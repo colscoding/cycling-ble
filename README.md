@@ -111,11 +111,18 @@ so where you keep it is up to you:
 
 ```ts
 const connection = await connectPower();
-localStorage.setItem('powerDeviceId', connection.deviceId ?? '');
+if (connection.deviceId) {
+    localStorage.setItem('powerDeviceId', connection.deviceId);
+}
 
-// next session
-const previousDeviceId = localStorage.getItem('powerDeviceId') ?? undefined;
-const reconnected = await connectPower({ previousDeviceId });
+// Next session. Fall back to a normal chooser prompt if the saved device is
+// gone — connectPower rejects rather than prompting when it cannot find it.
+const saved = localStorage.getItem('powerDeviceId');
+try {
+    const reconnected = await connectPower(saved ? { previousDeviceId: saved } : {});
+} catch {
+    const fresh = await connectPower();
+}
 ```
 
 This relies on `navigator.bluetooth.getDevices()`, which requires the user to
