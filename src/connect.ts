@@ -1,6 +1,7 @@
 import type {
     ConnectOptions,
     ConnectionStatus,
+    Logger,
     ReadingListener,
     SensorConnection,
     SensorReading,
@@ -44,12 +45,22 @@ interface SensorConfig {
 }
 
 /** Look up an already-permitted device, so reconnecting skips the chooser. */
-async function findPermittedDevice(bluetooth: Bluetooth, deviceId: string): Promise<BluetoothDevice | undefined> {
-    if (typeof bluetooth.getDevices !== 'function') return undefined;
+async function findPermittedDevice(
+    bluetooth: Bluetooth,
+    deviceId: string,
+    logger: Logger
+): Promise<BluetoothDevice | undefined> {
+    if (typeof bluetooth.getDevices !== 'function') {
+        logger.debug('getDevices() is unavailable; a chooser prompt is unavoidable');
+        return undefined;
+    }
     try {
         const devices = await bluetooth.getDevices();
         return devices.find((d) => d.id === deviceId);
-    } catch {
+    } catch (error) {
+        // The caller sees "not in the permitted list", which is misleading when
+        // the lookup itself failed. Say so somewhere.
+        logger.warn('getDevices() failed while looking up a saved device', error);
         return undefined;
     }
 }
@@ -68,7 +79,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
     let device: BluetoothDevice | undefined;
     if (previousDeviceId) {
-        device = await findPermittedDevice(bluetooth, previousDeviceId);
+        device = await findPermittedDevice(bluetooth, previousDeviceId, logger);
         if (!device) {
             throw new Error(`Device ${previousDeviceId} is not found in the permitted device list`);
         }
@@ -136,19 +147,25 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
         let selected: { characteristic: BluetoothRemoteGATTCharacteristic; createParser: () => ValueParser } | null =
             null;
+        let lastCandidateError: unknown;
         for (const candidate of config.candidates) {
             try {
                 const service = await server.getPrimaryService(candidate.serviceUuid);
                 const char = await service.getCharacteristic(candidate.characteristicUuid);
                 selected = { characteristic: char, createParser: candidate.createParser };
                 break;
-            } catch {
-                // Not present on this device; try the next candidate.
+            } catch (error) {
+                // Usually means the service is simply absent, but a GATT
+                // failure looks identical here. Keep the last one so the
+                // thrown error carries the real reason.
+                lastCandidateError = error;
             }
         }
 
         if (!selected) {
-            throw new Error(`${config.sensorName} exposes none of the expected BLE services`);
+            throw new Error(`${config.sensorName} exposes none of the expected BLE services`, {
+                cause: lastCandidateError,
+            });
         }
 
         await selected.characteristic.startNotifications();

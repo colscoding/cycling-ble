@@ -72,8 +72,10 @@ export function parseCadenceMeasurement(value: DataView, state: CadenceState): C
         return { rpm: null, state: newState };
     }
 
+    // Both deltas are corrected to non-negative above and timeDelta is known
+    // positive, so rpm cannot come out negative — only implausibly large.
     const rpm = Math.round((revDelta / (timeDelta / CRANK_TIME_RESOLUTION)) * 60);
-    if (rpm < 0 || rpm >= MAX_CADENCE_RPM) {
+    if (rpm >= MAX_CADENCE_RPM) {
         return { rpm: null, state: newState };
     }
 

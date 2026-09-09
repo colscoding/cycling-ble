@@ -242,6 +242,42 @@ describe('connectPower', () => {
         await assert.rejects(() => connectPower({ bluetooth: fake.bluetooth }), /none of the expected BLE services/);
     });
 
+    it('carries the underlying failure as the error cause', async () => {
+        // A GATT failure looks the same as an absent service from inside the
+        // candidate loop, so the real reason has to travel with the error.
+        const char = new FakeCharacteristic(CYCLING_POWER_MEASUREMENT);
+        const fake = createFakeBluetooth({ services: { [CYCLING_POWER]: { [CYCLING_POWER_MEASUREMENT]: char } } });
+        const gatt = fake.device.gatt;
+        const boom = new Error('GATT operation failed for unknown reason');
+        gatt.getPrimaryService = async () => {
+            throw boom;
+        };
+
+        await assert.rejects(
+            () => connectPower({ bluetooth: fake.bluetooth }),
+            (error: Error) => {
+                assert.match(error.message, /none of the expected BLE services/);
+                assert.equal(error.cause, boom, 'the real failure is not lost');
+                return true;
+            }
+        );
+    });
+
+    it('never reconnects when reconnect is false', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: false });
+
+        const statuses: string[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        fake.device.gatt.connected = false;
+        fake.device.dropConnection();
+        await new Promise((resolve) => setTimeout(resolve, 60));
+
+        assert.equal(fake.device.gatt.connected, false, 'stays down');
+        assert.deepEqual(statuses, ['disconnected'], 'the drop is still reported so the caller can act on it');
+    });
+
     it('leaves nothing attached when the initial connect fails', async () => {
         const fake = createFakeBluetooth({ services: {} });
 
