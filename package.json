@@ -1,0 +1,65 @@
+{
+    "name": "cycling-ble",
+    "version": "0.1.0",
+    "description": "Connect to cycling power, heart rate, cadence, and FTMS trainer sensors over Web Bluetooth",
+    "type": "module",
+    "license": "MIT",
+    "author": "Christian Olsson",
+    "keywords": [
+        "bluetooth",
+        "web-bluetooth",
+        "ble",
+        "cycling",
+        "power-meter",
+        "heart-rate",
+        "cadence",
+        "ftms",
+        "fitness"
+    ],
+    "engines": {
+        "node": ">=22.13.0",
+        "pnpm": ">=11.0.0"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./parsers": {
+            "types": "./dist/parsers/index.d.ts",
+            "import": "./dist/parsers/index.js"
+        },
+        "./mock": {
+            "types": "./dist/mock.d.ts",
+            "import": "./dist/mock.js"
+        }
+    },
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsc -p tsconfig.build.json",
+        "typecheck": "tsc --noEmit",
+        "lint": "eslint src test",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "test": "bash -O globstar -c 'tsx --test test/**/*.test.ts'",
+        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
+    },
+    "dependencies": {
+        "@types/web-bluetooth": "^0.0.21"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "@types/node": "^26.4.0",
+        "eslint": "^10.9.1",
+        "prettier": "^3.9.6",
+        "tsx": "^4.23.13",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.69.0"
+    },
+    "packageManager": "pnpm@11.25.0"
+}

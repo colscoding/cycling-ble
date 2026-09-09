@@ -1,0 +1,5 @@
+# esbuild (pulled in by tsx) ships its binary via optional platform packages
+# such as @esbuild/linux-x64, so the install script is only a legacy download
+# fallback and is deliberately not run.
+allowBuilds:
+    esbuild: false
