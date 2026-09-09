@@ -108,6 +108,11 @@ export class FakeDevice {
         );
     }
 
+    /** How many listeners are registered for an event type. */
+    listenerCountFor(type: string): number {
+        return (this.listeners.get(type) ?? []).length;
+    }
+
     /** Simulate the browser firing gattserverdisconnected. */
     dropConnection(): void {
         this.gatt.connected = false;

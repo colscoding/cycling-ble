@@ -120,8 +120,19 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         for (const listener of [...readingListeners]) listener(reading);
     };
 
+    /**
+     * True when the caller disconnected while we were awaiting something. Every
+     * step below spans an await, and a reconnect can be several seconds long,
+     * so `disconnect()` can land at any point in here.
+     */
+    const abandoned = (): boolean => reconnection.isManualDisconnect();
+
     const connect = async (): Promise<void> => {
         const server = await gatt.connect();
+        if (abandoned()) {
+            gatt.disconnect();
+            return;
+        }
 
         let selected: { characteristic: BluetoothRemoteGATTCharacteristic; createParser: () => ValueParser } | null =
             null;
@@ -140,6 +151,16 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             throw new Error(`${config.sensorName} exposes none of the expected BLE services`);
         }
 
+        await selected.characteristic.startNotifications();
+        if (abandoned()) {
+            gatt.disconnect();
+            return;
+        }
+
+        // Everything below mutates connection state, and is deliberately after
+        // the last await: a failure or an abandonment part-way through would
+        // otherwise leave a half-wired connection behind.
+
         // Drop the previous connection's listener before rebinding. A browser
         // may hand back the same characteristic object on reconnect, and
         // subscribing twice delivers every notification twice — which silently
@@ -148,8 +169,6 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
         characteristic = selected.characteristic;
         parseValue = selected.createParser();
-
-        await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleValueChanged);
 
         reconnection.reset();
@@ -163,7 +182,17 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     };
     device.addEventListener('gattserverdisconnected', handleGattDisconnect);
 
-    await connect();
+    try {
+        await connect();
+    } catch (error) {
+        // The caller never receives a connection here, so nothing else can ever
+        // clean this up. Left in place, the device listener would start a
+        // reconnect loop on the next drop that no one holds a handle to.
+        device.removeEventListener('gattserverdisconnected', handleGattDisconnect);
+        reconnection.markManualDisconnect();
+        gatt.disconnect();
+        throw error;
+    }
 
     const connection: SensorConnection = {
         deviceName,

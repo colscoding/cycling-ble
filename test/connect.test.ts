@@ -198,6 +198,36 @@ describe('connectPower', () => {
         assert.equal(readings.length, 1, 'a doubled subscription would silently double the sample rate');
     });
 
+    it('honours a disconnect that lands mid-reconnect', async () => {
+        // A user tapping "disconnect" while the UI shows "reconnecting" is
+        // ordinary. If the in-flight connect finishes afterwards it would
+        // resurrect the connection and keep delivering readings.
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 10 } });
+        const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
+
+        const gatt = fake.device.gatt;
+        const realConnect = gatt.connect.bind(gatt);
+        gatt.connect = async () => {
+            await new Promise((r) => setTimeout(r, 60));
+            return realConnect();
+        };
+
+        gatt.connected = false;
+        fake.device.dropConnection();
+        await new Promise((r) => setTimeout(r, 20)); // backoff done, connect() in flight
+        conn.disconnect();
+        await new Promise((r) => setTimeout(r, 120)); // let it finish
+
+        assert.equal(gatt.connected, false, 'must not be left connected');
+        assert.equal(char.listenerCount, 0, 'must not leave a listener attached');
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        char.emit(powerPacket(250));
+        assert.equal(readings.length, 0, 'must not deliver readings after disconnect');
+    });
+
     it('removes its characteristic listener on disconnect', async () => {
         const fake = powerMeterSetup();
         const conn = await connectPower({ bluetooth: fake.bluetooth });
@@ -210,6 +240,22 @@ describe('connectPower', () => {
     it('rejects when the device exposes none of the candidate services', async () => {
         const fake = createFakeBluetooth({ services: {} });
         await assert.rejects(() => connectPower({ bluetooth: fake.bluetooth }), /none of the expected BLE services/);
+    });
+
+    it('leaves nothing attached when the initial connect fails', async () => {
+        const fake = createFakeBluetooth({ services: {} });
+
+        await assert.rejects(() => connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 5 } }));
+
+        assert.equal(
+            fake.device.listenerCountFor('gattserverdisconnected'),
+            0,
+            'a surviving listener would reconnect a connection the caller never received'
+        );
+
+        fake.device.dropConnection();
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        assert.equal(fake.device.gatt.connected, false, 'no orphaned reconnect loop');
     });
 
     it('rejects when no Bluetooth implementation is available', async () => {
