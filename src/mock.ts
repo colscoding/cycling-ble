@@ -19,12 +19,13 @@ export interface MockSensorOptions {
 }
 
 export interface MockSensorConnection extends SensorConnection {
-    /** Emit one reading now, stamped with the current time. */
+    /**
+     * Emit one reading now, stamped with the current time.
+     *
+     * Pair with `autoStart: false` to drive the sensor yourself instead of
+     * waiting on generated values.
+     */
     emit(fields: Omit<SensorReading, 'timestamp'>): void;
-    /** Start generated readings. */
-    start(): void;
-    /** Stop generated readings without disconnecting. */
-    stop(): void;
 }
 
 function createMockSensor(
@@ -87,8 +88,6 @@ function createMockSensor(
             notifyStatus('disconnected');
         },
         emit,
-        start,
-        stop,
     };
 }
 

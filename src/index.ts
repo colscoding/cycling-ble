@@ -20,5 +20,3 @@ export type {
     SensorReading,
     StatusListener,
 } from './types.js';
-
-export { noopLogger } from './logger.js';

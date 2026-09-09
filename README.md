@@ -148,10 +148,23 @@ try {
 The packet decoders on their own. No browser APIs — these run in Node, which
 makes them useful for decoding recorded captures:
 
+| Function                               | Takes                     | Returns                                      |
+| -------------------------------------- | ------------------------- | -------------------------------------------- |
+| `parsePowerMeasurement(view)`          | Cycling Power Measurement | watts (`number`)                             |
+| `parseHeartRateMeasurement(view)`      | Heart Rate Measurement    | bpm (`number`)                               |
+| `parseCadenceMeasurement(view, state)` | CSC Measurement           | `{ rpm, state }`, `rpm` may be null          |
+| `parseIndoorBikeData(view)`            | FTMS Indoor Bike Data     | `{ powerW, cadenceRpm }`, either may be null |
+
 ```ts
 import { parseIndoorBikeData, parseCadenceMeasurement, initialCadenceState } from 'cycling-ble/parsers';
 
 const { powerW, cadenceRpm } = parseIndoorBikeData(dataView);
+
+// parseCadenceMeasurement is the one stateful parser: thread its `state`
+// through successive calls, starting from initialCadenceState.
+let state = initialCadenceState;
+const result = parseCadenceMeasurement(dataView, state);
+state = result.state;
 ```
 
 ### `cycling-ble/mock`
@@ -159,13 +172,18 @@ const { powerW, cadenceRpm } = parseIndoorBikeData(dataView);
 Simulated sensors with the same shape as a real connection, for demos, UI work
 without hardware, and end-to-end tests:
 
+`createMockPowerSensor`, `createMockHeartRateSensor`, and
+`createMockCadenceSensor` each take `{ deviceName?, intervalMs?, autoStart? }`
+and generate plausible values on an interval until `disconnect()`.
+
 ```ts
 import { createMockPowerSensor } from 'cycling-ble/mock';
 
 const sensor = createMockPowerSensor({ intervalMs: 1000 });
 sensor.addListener((reading) => console.log(reading.power));
+sensor.disconnect();
 
-// or drive it yourself
+// Or drive it yourself, which is what you want in a test — no wall-clock wait.
 const manual = createMockPowerSensor({ autoStart: false });
 manual.emit({ power: 250 });
 ```

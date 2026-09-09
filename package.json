@@ -5,6 +5,14 @@
     "type": "module",
     "license": "MIT",
     "author": "Christian Olsson",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/colscoding/cycling-ble.git"
+    },
+    "bugs": {
+        "url": "https://github.com/colscoding/cycling-ble/issues"
+    },
+    "homepage": "https://github.com/colscoding/cycling-ble#readme",
     "keywords": [
         "bluetooth",
         "web-bluetooth",
