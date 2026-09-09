@@ -140,6 +140,12 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             throw new Error(`${config.sensorName} exposes none of the expected BLE services`);
         }
 
+        // Drop the previous connection's listener before rebinding. A browser
+        // may hand back the same characteristic object on reconnect, and
+        // subscribing twice delivers every notification twice — which silently
+        // doubles the recorded sample rate rather than failing visibly.
+        characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
+
         characteristic = selected.characteristic;
         parseValue = selected.createParser();
 

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { connectPower, connectHeartRate } from '../src/connect.js';
+import { connectPower, connectHeartRate, connectCadence } from '../src/connect.js';
 import type { SensorReading } from '../src/types.js';
 import {
     FakeCharacteristic,
@@ -8,6 +8,7 @@ import {
     powerPacket,
     indoorBikePacket,
     heartRatePacket,
+    cscPacket,
 } from './helpers/fake-bluetooth.js';
 
 const CYCLING_POWER = 'cycling_power';
@@ -172,6 +173,31 @@ describe('connectPower', () => {
         assert.equal(fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).notificationsStopped, true);
     });
 
+    it('does not resubscribe on reconnect, so one packet stays one reading', async () => {
+        // Deliberately uses power rather than cadence. A stateful cadence
+        // parser returns null on a duplicated packet (zero time delta), so it
+        // would hide a double subscription; a power parser reports it.
+        const fake = powerMeterSetup();
+        const conn = await connectPower({
+            bluetooth: fake.bluetooth,
+            reconnect: { baseDelayMs: 5, maxAttempts: 2 },
+        });
+        const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
+        assert.equal(char.listenerCount, 1);
+
+        fake.device.gatt.connected = false;
+        fake.device.dropConnection();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        assert.equal(fake.device.gatt.connected, true, 'reconnected');
+        assert.equal(char.listenerCount, 1, 'reconnect must not stack a second listener');
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        char.emit(powerPacket(250));
+
+        assert.equal(readings.length, 1, 'a doubled subscription would silently double the sample rate');
+    });
+
     it('removes its characteristic listener on disconnect', async () => {
         const fake = powerMeterSetup();
         const conn = await connectPower({ bluetooth: fake.bluetooth });
@@ -238,5 +264,68 @@ describe('connectHeartRate', () => {
 
         assert.equal(readings[0]!.heartRate, 142);
         assert.equal(readings[0]!.power, undefined);
+    });
+});
+
+describe('connectCadence', () => {
+    const CSC = 'cycling_speed_and_cadence';
+    const CSC_MEASUREMENT = 'csc_measurement';
+
+    function cadenceSetup() {
+        return createFakeBluetooth({
+            deviceName: 'Cadence Pod',
+            services: { [CSC]: { [CSC_MEASUREMENT]: new FakeCharacteristic(CSC_MEASUREMENT) } },
+        });
+    }
+
+    it('emits nothing for the first notification, because RPM needs a delta', async () => {
+        const fake = cadenceSetup();
+        const conn = await connectCadence({ bluetooth: fake.bluetooth });
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        fake.characteristic(CSC, CSC_MEASUREMENT).emit(cscPacket(10, 1024));
+
+        assert.equal(readings.length, 0, 'a lone cumulative sample yields no cadence');
+    });
+
+    it('emits cadence once two samples have arrived', async () => {
+        const fake = cadenceSetup();
+        const conn = await connectCadence({ bluetooth: fake.bluetooth });
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        const char = fake.characteristic(CSC, CSC_MEASUREMENT);
+        char.emit(cscPacket(10, 1024));
+        char.emit(cscPacket(11, 2048));
+
+        assert.equal(readings.length, 1);
+        assert.equal(readings[0]!.cadence, 60);
+        assert.equal(readings[0]!.power, undefined);
+    });
+
+    it('starts from a clean parser after reconnecting', async () => {
+        const fake = cadenceSetup();
+        const conn = await connectCadence({
+            bluetooth: fake.bluetooth,
+            reconnect: { baseDelayMs: 5, maxAttempts: 2 },
+        });
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        const char = fake.characteristic(CSC, CSC_MEASUREMENT);
+        char.emit(cscPacket(10, 1024));
+        char.emit(cscPacket(11, 2048));
+        assert.equal(readings.length, 1, 'baseline: cadence flows before the drop');
+
+        fake.device.gatt.connected = false;
+        fake.device.dropConnection();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        assert.equal(fake.device.gatt.connected, true, 'reconnected');
+
+        // Crank counters kept running while disconnected. A parser carrying
+        // stale state would compute a huge bogus delta from this single sample.
+        char.emit(cscPacket(400, 60000));
+        assert.equal(readings.length, 1, 'the first sample after reconnect yields nothing');
     });
 });

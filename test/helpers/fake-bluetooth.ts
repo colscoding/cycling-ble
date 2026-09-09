@@ -187,6 +187,15 @@ export function indoorBikePacket(rpm: number, watts: number): DataView {
     return v;
 }
 
+/** A CSC Measurement payload with crank revolution data only. */
+export function cscPacket(revs: number, timeUnits: number): DataView {
+    const v = new DataView(new ArrayBuffer(5));
+    v.setUint8(0, 0x02);
+    v.setUint16(1, revs, true);
+    v.setUint16(3, timeUnits, true);
+    return v;
+}
+
 /** A Heart Rate Measurement payload in uint8 format. */
 export function heartRatePacket(bpm: number): DataView {
     const v = new DataView(new ArrayBuffer(2));
