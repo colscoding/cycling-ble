@@ -6,6 +6,8 @@
  * so production code stays honestly typed.
  */
 
+import type { BluetoothAdapter } from '../../src/types.js';
+
 type Listener = (event: Event) => void;
 
 export class FakeCharacteristic {
@@ -134,7 +136,7 @@ export interface FakeBluetoothSetup {
 }
 
 export interface FakeBluetooth {
-    bluetooth: Bluetooth;
+    bluetooth: BluetoothAdapter;
     device: FakeDevice;
     requestDeviceCalls: { filters?: unknown; optionalServices?: unknown }[];
     characteristic(serviceUuid: string, characteristicUuid: string): FakeCharacteristic;
@@ -160,7 +162,7 @@ export function createFakeBluetooth(setup: FakeBluetoothSetup): FakeBluetooth {
         async getDevices() {
             return setup.permitted ? [device] : [];
         },
-    } as unknown as Bluetooth;
+    } satisfies BluetoothAdapter;
 
     return {
         bluetooth,

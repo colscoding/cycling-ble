@@ -6,7 +6,7 @@
         "rootDir": "src",
         "declarationMap": true,
         "sourceMap": true,
-        "types": ["@types/web-bluetooth"]
+        "types": ["web-bluetooth"]
     },
     "include": ["src/**/*"]
 }

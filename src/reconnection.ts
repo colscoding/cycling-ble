@@ -44,6 +44,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
     const maxDelayMs = tuning.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
 
     let attempts = 0;
+    let reconnecting = false;
     let manualDisconnect = false;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -108,10 +109,20 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
         attemptReconnect,
 
         handleDisconnect(connectFn: () => Promise<void>): void {
-            if (manualDisconnect) return;
+            // A browser can report the same drop more than once, and another can
+            // arrive while a retry is already in flight. Without this guard each
+            // event starts its own backoff chain and they race each other.
+            if (manualDisconnect || reconnecting) return;
+
             notify('disconnected');
             if (!enabled) return;
-            attemptReconnect(connectFn).catch((e) => logger.error(`[${sensorName}] reconnect failed:`, e));
+
+            reconnecting = true;
+            attemptReconnect(connectFn)
+                .catch((e) => logger.error(`[${sensorName}] reconnect failed:`, e))
+                .finally(() => {
+                    reconnecting = false;
+                });
         },
 
         markManualDisconnect(): void {

@@ -55,13 +55,12 @@
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "bash -O globstar -c 'tsx --test test/**/*.test.ts'",
-        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
-    },
-    "dependencies": {
-        "@types/web-bluetooth": "^0.0.21"
+        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build",
+        "prepublishOnly": "pnpm run check"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
+        "@types/web-bluetooth": "^0.0.21",
         "@types/node": "^26.4.0",
         "eslint": "^10.9.1",
         "prettier": "^3.9.6",

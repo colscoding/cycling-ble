@@ -79,6 +79,17 @@ describe('mock sensors', () => {
         assert.equal(readings.length, 0);
     });
 
+    it('reports disconnected the same way a real connection does', () => {
+        // The mock exists to stand in for a real connection. If the two report
+        // different statuses, a UI driven by onStatusChange behaves differently
+        // in demo mode than in production, and the tests hide it.
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: string[] = [];
+        sensor.onStatusChange((s) => statuses.push(s));
+        sensor.disconnect();
+        assert.deepEqual(statuses, ['disconnected']);
+    });
+
     it('uses a custom device name', () => {
         const sensor = createMockPowerSensor({ deviceName: 'My Fake Meter', autoStart: false });
         assert.equal(sensor.deviceName, 'My Fake Meter');

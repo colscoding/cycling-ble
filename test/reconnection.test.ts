@@ -92,6 +92,25 @@ describe('createReconnectionManager', () => {
         assert.equal(calls, 1);
     });
 
+    it('runs one backoff cycle even when the drop is reported repeatedly', async () => {
+        // A browser can report the same drop more than once. Each event used to
+        // start its own chain, and they raced.
+        const m = make({ baseDelayMs: 10 });
+        let calls = 0;
+        const connectFn = async (): Promise<void> => {
+            calls++;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        };
+
+        m.handleDisconnect(connectFn);
+        m.handleDisconnect(connectFn);
+        m.handleDisconnect(connectFn);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+
+        assert.equal(calls, 1, 'one reconnect, not one per event');
+        assert.deepEqual(statuses, ['disconnected', 'reconnecting'], 'and one round of status events');
+    });
+
     it('never reconnects when reconnection is disabled', async () => {
         const m = make(false);
         let calls = 0;

@@ -64,6 +64,27 @@ export interface ReconnectOptions {
     maxDelayMs?: number;
 }
 
+/**
+ * The part of the Web Bluetooth `Bluetooth` interface this package uses.
+ *
+ * Declared structurally rather than as the DOM's `Bluetooth` type so that
+ * consumers need no ambient Web Bluetooth typings of their own — a published
+ * `.d.ts` that depends on an ambient global forces every consumer to configure
+ * one. `navigator.bluetooth` satisfies this, and so does a polyfill or a fake.
+ */
+export interface BluetoothAdapter {
+    /**
+     * Matches the shape this package actually sends, not the full
+     * `RequestDeviceOptions` union: a wider parameter type here would stop the
+     * real `navigator.bluetooth` from satisfying the interface.
+     */
+    requestDevice(options: {
+        filters: { services: (string | number)[] }[];
+        optionalServices: (string | number)[];
+    }): Promise<unknown>;
+    getDevices?(): Promise<unknown[]>;
+}
+
 /** Options accepted by every connect function. */
 export interface ConnectOptions {
     /** A previously returned `deviceId`, to reconnect without a chooser prompt. */
@@ -77,5 +98,5 @@ export interface ConnectOptions {
      * Override to supply a polyfill (such as the `webbluetooth` package on
      * Node) or a fake in tests.
      */
-    bluetooth?: Bluetooth;
+    bluetooth?: BluetoothAdapter;
 }

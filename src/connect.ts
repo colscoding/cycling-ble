@@ -1,4 +1,5 @@
 import type {
+    BluetoothAdapter,
     ConnectOptions,
     ConnectionStatus,
     Logger,
@@ -46,7 +47,7 @@ interface SensorConfig {
 
 /** Look up an already-permitted device, so reconnecting skips the chooser. */
 async function findPermittedDevice(
-    bluetooth: Bluetooth,
+    bluetooth: BluetoothAdapter,
     deviceId: string,
     logger: Logger
 ): Promise<BluetoothDevice | undefined> {
@@ -55,7 +56,9 @@ async function findPermittedDevice(
         return undefined;
     }
     try {
-        const devices = await bluetooth.getDevices();
+        // The adapter is typed structurally, so the concrete Web Bluetooth
+        // shapes are reasserted here, where the real typings are available.
+        const devices = (await bluetooth.getDevices()) as BluetoothDevice[];
         return devices.find((d) => d.id === deviceId);
     } catch (error) {
         // The caller sees "not in the permitted list", which is misleading when
@@ -66,7 +69,12 @@ async function findPermittedDevice(
 }
 
 async function connectSensor(config: SensorConfig, options: ConnectOptions = {}): Promise<SensorConnection> {
-    const { previousDeviceId, logger = noopLogger, reconnect, bluetooth = globalThis.navigator?.bluetooth } = options;
+    const {
+        previousDeviceId,
+        logger = noopLogger,
+        reconnect,
+        bluetooth = globalThis.navigator?.bluetooth as BluetoothAdapter | undefined,
+    } = options;
 
     if (!bluetooth) {
         throw new Error(
@@ -84,10 +92,10 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             throw new Error(`Device ${previousDeviceId} is not found in the permitted device list`);
         }
     } else {
-        device = await bluetooth.requestDevice({
+        device = (await bluetooth.requestDevice({
             filters: config.candidates.map((c) => ({ services: [c.serviceUuid] })),
             optionalServices: serviceUuids,
-        });
+        })) as BluetoothDevice;
     }
 
     const gatt = device.gatt;
@@ -237,6 +245,9 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
                 characteristic.stopNotifications().catch((e) => logger.debug('stopNotifications failed', e));
             }
             gatt.disconnect();
+            // The mock reports this too. A caller rendering state purely from
+            // onStatusChange must not be left showing "connected".
+            notifyStatus('disconnected');
         },
     };
 

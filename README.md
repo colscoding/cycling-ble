@@ -83,7 +83,7 @@ after connecting produces no reading — RPM only exists as a delta.
 | `previousDeviceId` | `string`                    | —                       | Reconnect to a known device without showing the chooser         |
 | `logger`           | `Logger`                    | no-op                   | Where the library logs; pass `console` to see it                |
 | `reconnect`        | `ReconnectOptions \| false` | 5 attempts, 1 s backoff | Automatic reconnection tuning, or `false` to handle it yourself |
-| `bluetooth`        | `Bluetooth`                 | `navigator.bluetooth`   | Supply a polyfill or a test fake                                |
+| `bluetooth`        | `BluetoothAdapter`          | `navigator.bluetooth`   | Supply a polyfill or a test fake                                |
 
 ### `SensorConnection`
 

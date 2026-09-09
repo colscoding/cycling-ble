@@ -16,7 +16,7 @@
         "exactOptionalPropertyTypes": true,
         "noUncheckedIndexedAccess": true,
         "declaration": true,
-        "types": ["@types/web-bluetooth", "node"]
+        "types": ["web-bluetooth", "node"]
     },
     "include": ["src/**/*", "test/**/*"],
     "exclude": ["node_modules", "dist"]
