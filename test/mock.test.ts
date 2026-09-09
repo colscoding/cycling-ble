@@ -90,6 +90,17 @@ describe('mock sensors', () => {
         assert.deepEqual(statuses, ['disconnected']);
     });
 
+    it('ignores emit() once disconnected', () => {
+        // A real connection drops its characteristic listener on disconnect, so
+        // nothing reaches a listener afterwards. The mock has to match.
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const readings: SensorReading[] = [];
+        sensor.addListener((r) => readings.push(r));
+        sensor.disconnect();
+        sensor.emit({ power: 250 });
+        assert.equal(readings.length, 0);
+    });
+
     it('uses a custom device name', () => {
         const sensor = createMockPowerSensor({ deviceName: 'My Fake Meter', autoStart: false });
         assert.equal(sensor.deviceName, 'My Fake Meter');

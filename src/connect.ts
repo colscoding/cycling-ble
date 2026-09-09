@@ -148,10 +148,6 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
     const connect = async (): Promise<void> => {
         const server = await gatt.connect();
-        if (abandoned()) {
-            gatt.disconnect();
-            return;
-        }
 
         let selected: { characteristic: BluetoothRemoteGATTCharacteristic; createParser: () => ValueParser } | null =
             null;

@@ -64,7 +64,8 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
         });
 
     const attemptReconnect = async (connectFn: () => Promise<void>): Promise<void> => {
-        if (!enabled || manualDisconnect || cancelled) return;
+        // markManualDisconnect() cancels as well, so `cancelled` covers it.
+        if (!enabled || cancelled) return;
 
         if (attempts >= maxAttempts) {
             logger.error(`[${sensorName}] max reconnection attempts reached`);

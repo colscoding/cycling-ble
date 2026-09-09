@@ -47,6 +47,15 @@ describe('createReconnectionManager', () => {
         assert.ok(statuses.includes('failed'), 'reports failure');
     });
 
+    it('emits no status churn after a manual disconnect', async () => {
+        // Bailing out late would still skip the reconnect, but only after
+        // announcing 'reconnecting' to every listener first.
+        const m = make();
+        m.markManualDisconnect();
+        await m.attemptReconnect(async () => {});
+        assert.deepEqual(statuses, [], 'a reconnect that will not happen must not be announced');
+    });
+
     it('does not reconnect after a manual disconnect', async () => {
         const m = make();
         m.markManualDisconnect();
