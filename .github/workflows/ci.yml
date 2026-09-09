@@ -10,9 +10,9 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v5
+            # Version comes from the packageManager field in package.json.
+            # Passing `version` here as well makes the action fail on mismatch.
             - uses: pnpm/action-setup@v4
-              with:
-                  version: 11
             - uses: actions/setup-node@v5
               with:
                   node-version: 22
