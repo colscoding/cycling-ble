@@ -5,3 +5,4 @@ dist/
 
 # The implementation plan is kept in the consuming project, not here.
 PLAN.md
+.env
