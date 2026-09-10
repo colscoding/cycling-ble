@@ -1,2 +1,5 @@
 dist/
 pnpm-lock.yaml
+
+# Git ignores these through a nested .gitignore, which Prettier does not read.
+.remember/
