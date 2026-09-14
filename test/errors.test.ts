@@ -106,6 +106,52 @@ describe('classifyBluetoothError', () => {
         assert.equal(info.canRetry, false);
     });
 
+    describe('matching wording regardless of capitalisation', () => {
+        // Browsers capitalise these messages however they like, and a message
+        // usually starts a sentence: "Failed to connect", not "failed to connect".
+        it('recognises "Failed to connect" as a connection failure', () => {
+            assert.equal(classifyBluetoothError(new Error('Failed to connect to device')).kind, 'connection-failed');
+        });
+
+        it('recognises "Connection attempt failed." as a connection failure', () => {
+            assert.equal(classifyBluetoothError(new Error('Connection attempt failed.')).kind, 'connection-failed');
+        });
+
+        it('recognises "Timeout" and "timed out" as a timeout', () => {
+            assert.equal(classifyBluetoothError(new Error('Operation Timeout')).kind, 'timeout');
+            assert.equal(classifyBluetoothError(new Error('The operation timed out')).kind, 'timeout');
+        });
+
+        it('recognises "Permission denied" as a permission denial', () => {
+            assert.equal(
+                classifyBluetoothError(named('NotAllowedError', 'Permission denied')).kind,
+                'permission-denied'
+            );
+        });
+    });
+
+    it('recognises a saved device that is no longer permitted as not found', () => {
+        // The message connectPower throws for a stale previousDeviceId.
+        const info = classifyBluetoothError(new Error('Device abc is not found in the permitted device list'));
+        assert.equal(info.kind, 'not-found');
+    });
+
+    it('reads name and message from an error-like object that is not an Error', () => {
+        // Errors crossing a realm, a worker, or a serialisation boundary lose
+        // their prototype but keep their fields.
+        const info = classifyBluetoothError({
+            name: 'NotFoundError',
+            message: 'User cancelled the requestDevice() chooser.',
+        });
+        assert.equal(info.kind, 'cancelled');
+    });
+
+    it('treats null and objects without string name or message as unknown', () => {
+        assert.equal(classifyBluetoothError(null).kind, 'unknown');
+        assert.equal(classifyBluetoothError({ code: 42 }).kind, 'unknown');
+        assert.equal(classifyBluetoothError({ name: 7, message: ['GATT'] }).kind, 'unknown');
+    });
+
     it('classifies by name alone when the message is unhelpful', () => {
         assert.equal(classifyBluetoothError(named('SecurityError', '')).kind, 'permission-denied');
         assert.equal(classifyBluetoothError(named('NetworkError', '')).kind, 'timeout');

@@ -332,6 +332,14 @@ describe('connectPower', () => {
             /not found in the permitted device list/
         );
     });
+
+    it('rejects for a gone saved device with an error classified as not-found', async () => {
+        const fake = createFakeBluetooth({ deviceId: 'saved-1', permitted: false, services: {} });
+        await assert.rejects(
+            () => connectPower({ bluetooth: fake.bluetooth, previousDeviceId: 'saved-1' }),
+            (error) => classifyBluetoothError(error).kind === 'not-found'
+        );
+    });
 });
 
 describe('connectHeartRate', () => {

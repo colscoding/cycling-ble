@@ -61,15 +61,17 @@ export interface ClassifyOptions {
  */
 export function classifyBluetoothError(error: unknown, options: ClassifyOptions = {}): BluetoothErrorInfo {
     const label = options.sensorLabel ?? 'sensor';
-    const text = error instanceof Error ? error.message : String(error);
-    const name = error instanceof Error ? error.name : '';
+    const { name, message } = nameAndMessage(error);
+    // Wording is matched case-insensitively: a message usually starts a
+    // sentence, so "Failed to connect" has to match "fail" and "connect".
+    const text = message.toLowerCase();
 
     if (
-        text.includes('User cancelled') ||
-        text.includes('cancelled the requestDevice') ||
+        text.includes('user cancelled') ||
+        text.includes('cancelled the requestdevice') ||
         text.includes('dialog cancelled') ||
-        text.includes('Chooser cancelled') ||
-        (name === 'NotFoundError' && text.toLowerCase().includes('cancel'))
+        text.includes('chooser cancelled') ||
+        (name === 'NotFoundError' && text.includes('cancel'))
     ) {
         return {
             kind: 'cancelled',
@@ -81,10 +83,10 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
     }
 
     if (
-        text.includes('Bluetooth adapter not available') ||
-        text.includes('Web Bluetooth API is not available') ||
-        text.includes('Web Bluetooth is not available') ||
-        (name === 'NotFoundError' && text.includes('Bluetooth'))
+        text.includes('bluetooth adapter not available') ||
+        text.includes('web bluetooth api is not available') ||
+        text.includes('web bluetooth is not available') ||
+        (name === 'NotFoundError' && text.includes('bluetooth'))
     ) {
         return {
             kind: 'unavailable',
@@ -101,9 +103,11 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
     }
 
     if (
-        text.includes('No Bluetooth devices') ||
-        text.includes('No devices found') ||
-        (name === 'NotFoundError' && !text.includes('Bluetooth'))
+        text.includes('no bluetooth devices') ||
+        text.includes('no devices found') ||
+        // Thrown by the connect functions for a stale previousDeviceId.
+        text.includes('not found in the permitted device list') ||
+        (name === 'NotFoundError' && !text.includes('bluetooth'))
     ) {
         return {
             kind: 'not-found',
@@ -121,8 +125,8 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
     }
 
     if (
-        text.includes('GATT') ||
-        text.includes('Connection failed') ||
+        text.includes('gatt') ||
+        text.includes('connection failed') ||
         (text.includes('connect') && text.includes('fail'))
     ) {
         return {
@@ -140,7 +144,7 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         };
     }
 
-    if (text.includes('SecurityError') || text.includes('permission') || name === 'SecurityError') {
+    if (text.includes('securityerror') || text.includes('permission') || name === 'SecurityError') {
         return {
             kind: 'permission-denied',
             title: 'Permission denied',
@@ -155,7 +159,12 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         };
     }
 
-    if (text.includes('NetworkError') || text.includes('timeout') || name === 'NetworkError') {
+    if (
+        text.includes('networkerror') ||
+        text.includes('timeout') ||
+        text.includes('timed out') ||
+        name === 'NetworkError'
+    ) {
         return {
             kind: 'timeout',
             title: 'Connection timed out',
@@ -171,8 +180,8 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
     }
 
     if (
-        (text.includes('Service') && text.includes('not found')) ||
-        text.includes('none of the expected BLE services')
+        (text.includes('service') && text.includes('not found')) ||
+        text.includes('none of the expected ble services')
     ) {
         return {
             kind: 'incompatible',
@@ -200,4 +209,20 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         ],
         canRetry: true,
     };
+}
+
+/**
+ * The name and message of anything a `catch` can receive. Errors that cross a
+ * realm, a worker, or a serialisation boundary are no longer `instanceof Error`
+ * but keep both fields, so read them structurally.
+ */
+function nameAndMessage(error: unknown): { name: string; message: string } {
+    if (typeof error === 'object' && error !== null) {
+        const { name, message } = error as { name?: unknown; message?: unknown };
+        return {
+            name: typeof name === 'string' ? name : '',
+            message: typeof message === 'string' ? message : String(error),
+        };
+    }
+    return { name: '', message: String(error) };
 }
