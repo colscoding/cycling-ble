@@ -252,6 +252,9 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         },
 
         disconnect(): void {
+            // Teardown often runs twice (an unmount and an unload handler, say);
+            // the second call must not announce a second 'disconnected'.
+            if (reconnection.isManualDisconnect()) return;
             reconnection.markManualDisconnect();
             device.removeEventListener('gattserverdisconnected', handleGattDisconnect);
             if (characteristic) {

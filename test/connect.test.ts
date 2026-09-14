@@ -695,6 +695,28 @@ describe('connection lifecycle', () => {
         assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
     });
 
+    it('treats a second disconnect() as a no-op', async () => {
+        // Teardown code often runs twice — a component unmount plus a page
+        // unload handler. The second call must not announce another drop.
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
+        let stopCalls = 0;
+        char.stopNotifications = async () => {
+            stopCalls++;
+            return char;
+        };
+        const statuses: ConnectionStatus[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        conn.disconnect();
+        conn.disconnect();
+
+        assert.deepEqual(statuses, ['disconnected']);
+        assert.equal(stopCalls, 1);
+        assert.equal(fake.device.gatt.disconnectCalls, 1);
+    });
+
     it('stops notifying a status listener once unsubscribed', async () => {
         const fake = powerMeterSetup();
         const conn = await connectPower({ bluetooth: fake.bluetooth });

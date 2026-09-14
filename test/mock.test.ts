@@ -101,6 +101,15 @@ describe('mock sensors', () => {
         assert.equal(readings.length, 0);
     });
 
+    it('treats a second disconnect() as a no-op, as a real connection does', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: string[] = [];
+        sensor.onStatusChange((s) => statuses.push(s));
+        sensor.disconnect();
+        sensor.disconnect();
+        assert.deepEqual(statuses, ['disconnected']);
+    });
+
     it('stops notifying a status listener once unsubscribed', () => {
         const sensor = createMockPowerSensor({ autoStart: false });
         const statuses: string[] = [];

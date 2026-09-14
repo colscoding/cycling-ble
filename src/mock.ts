@@ -85,6 +85,7 @@ function createMockSensor(
             return statusListeners.add(listener);
         },
         disconnect(): void {
+            if (disconnected) return;
             stop();
             disconnected = true;
             notifyStatus('disconnected');
