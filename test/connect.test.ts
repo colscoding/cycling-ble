@@ -517,34 +517,42 @@ describe('connection setup edge cases', () => {
         assert.equal('deviceId' in conn, false, 'an omitted key, not an empty string');
     });
 
-    it('rejects without prompting when getDevices() is unavailable, and says why in the log', async () => {
+    it('rejects without prompting when getDevices() is unavailable, and says that is why', async () => {
+        // "Not in the permitted list" would send someone looking for a
+        // permission problem that does not exist.
         const fake = powerMeterSetup();
-        const { logger, calls } = recordingLogger();
         const bluetooth: BluetoothAdapter = { requestDevice: fake.bluetooth.requestDevice };
 
         await assert.rejects(
-            () => connectPower({ bluetooth, logger, previousDeviceId: 'fake-device-1' }),
-            /not found in the permitted device list/
+            () => connectPower({ bluetooth, previousDeviceId: 'fake-device-1' }),
+            (error: Error) => {
+                assert.match(error.message, /does not support getDevices\(\)/);
+                assert.doesNotMatch(error.message, /permitted device list/);
+                return true;
+            }
         );
         assert.equal(fake.requestDeviceCalls.length, 0, 'no chooser prompt');
-        assert.match(calls.debug.join('\n'), /getDevices\(\) is unavailable/);
     });
 
-    it('rejects and warns when getDevices() itself fails', async () => {
+    it('rejects with the lookup failure as the cause when getDevices() fails', async () => {
         const fake = powerMeterSetup();
-        const { logger, calls } = recordingLogger();
+        const boom = new Error('permissions backend unavailable');
         const bluetooth: BluetoothAdapter = {
             requestDevice: fake.bluetooth.requestDevice,
             getDevices: async () => {
-                throw new Error('permissions backend unavailable');
+                throw boom;
             },
         };
 
         await assert.rejects(
-            () => connectPower({ bluetooth, logger, previousDeviceId: 'fake-device-1' }),
-            /not found in the permitted device list/
+            () => connectPower({ bluetooth, previousDeviceId: 'fake-device-1' }),
+            (error: Error) => {
+                assert.match(error.message, /could not look up saved device fake-device-1/i);
+                assert.equal(error.cause, boom, 'the real failure travels with the error');
+                return true;
+            }
         );
-        assert.equal(calls.warn.length, 1, 'the lookup failure is not silently reported as "not found"');
+        assert.equal(fake.requestDeviceCalls.length, 0, 'no chooser prompt');
     });
 });
 

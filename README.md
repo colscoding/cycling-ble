@@ -180,7 +180,14 @@ async function connectRemembered(): Promise<SensorConnection> {
 
 This relies on `navigator.bluetooth.getDevices()`, which requires the user to
 have previously granted access to that device. It rejects rather than falling
-back to a chooser prompt, so you can tell the two situations apart.
+back to a chooser prompt, so you can tell the two situations apart. The
+rejection says which case it hit:
+
+- the device is no longer permitted — `classifyBluetoothError` reports
+  `not-found`;
+- the browser does not support `getDevices()` at all, so there is no point
+  saving device ids;
+- the lookup itself failed — the original error is the rejection's `cause`.
 
 The chooser still needs a user gesture. A saved device that is switched off or
 out of range can take a while to fail, and by then the browser may no longer

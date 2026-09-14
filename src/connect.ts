@@ -2,7 +2,6 @@ import type {
     BluetoothAdapter,
     ConnectOptions,
     ConnectionStatus,
-    Logger,
     ReadingListener,
     SensorConnection,
     SensorReading,
@@ -46,27 +45,35 @@ interface SensorConfig {
     sensorName: string;
 }
 
-/** Look up an already-permitted device, so reconnecting skips the chooser. */
-async function findPermittedDevice(
-    bluetooth: BluetoothAdapter,
-    deviceId: string,
-    logger: Logger
-): Promise<BluetoothDevice | undefined> {
+/**
+ * Look up an already-permitted device, so reconnecting skips the chooser.
+ *
+ * Rejects rather than prompting in every failure case, and says which one:
+ * a device that is gone, a browser that cannot look devices up at all, and a
+ * lookup that failed need different responses from the caller.
+ */
+async function findPermittedDevice(bluetooth: BluetoothAdapter, deviceId: string): Promise<BluetoothDevice> {
     if (typeof bluetooth.getDevices !== 'function') {
-        logger.debug('getDevices() is unavailable; a chooser prompt is unavoidable');
-        return undefined;
+        throw new Error(
+            `Cannot reconnect to saved device ${deviceId} without a chooser: ` +
+                'this browser does not support getDevices()'
+        );
     }
+
+    let devices: BluetoothDevice[];
     try {
         // The adapter is typed structurally, so the concrete Web Bluetooth
         // shapes are reasserted here, where the real typings are available.
-        const devices = (await bluetooth.getDevices()) as BluetoothDevice[];
-        return devices.find((d) => d.id === deviceId);
+        devices = (await bluetooth.getDevices()) as BluetoothDevice[];
     } catch (error) {
-        // The caller sees "not in the permitted list", which is misleading when
-        // the lookup itself failed. Say so somewhere.
-        logger.warn('getDevices() failed while looking up a saved device', error);
-        return undefined;
+        throw new Error(`Could not look up saved device ${deviceId}`, { cause: error });
     }
+
+    const device = devices.find((d) => d.id === deviceId);
+    if (!device) {
+        throw new Error(`Device ${deviceId} is not found in the permitted device list`);
+    }
+    return device;
 }
 
 async function connectSensor(config: SensorConfig, options: ConnectOptions = {}): Promise<SensorConnection> {
@@ -86,18 +93,12 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
     const serviceUuids = config.candidates.map((c) => c.serviceUuid);
 
-    let device: BluetoothDevice | undefined;
-    if (previousDeviceId) {
-        device = await findPermittedDevice(bluetooth, previousDeviceId, logger);
-        if (!device) {
-            throw new Error(`Device ${previousDeviceId} is not found in the permitted device list`);
-        }
-    } else {
-        device = (await bluetooth.requestDevice({
-            filters: config.candidates.map((c) => ({ services: [c.serviceUuid] })),
-            optionalServices: serviceUuids,
-        })) as BluetoothDevice;
-    }
+    const device = previousDeviceId
+        ? await findPermittedDevice(bluetooth, previousDeviceId)
+        : ((await bluetooth.requestDevice({
+              filters: config.candidates.map((c) => ({ services: [c.serviceUuid] })),
+              optionalServices: serviceUuids,
+          })) as BluetoothDevice);
 
     const gatt = device.gatt;
     if (!gatt) {
