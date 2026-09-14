@@ -72,6 +72,29 @@ describe('parseCadenceMeasurement', () => {
         assert.equal(second.rpm, null);
     });
 
+    it('accepts cadence just under the 300 rpm ceiling and rejects it at the ceiling', () => {
+        const first = parseCadenceMeasurement(crankView(0, 0), initialCadenceState);
+        // 299 revolutions in 60 s (61440 / 1024) is 299 rpm.
+        assert.equal(parseCadenceMeasurement(crankView(299, 61440), first.state).rpm, 299);
+        // 5 revolutions in 1 s is exactly 300 rpm.
+        assert.equal(parseCadenceMeasurement(crankView(5, 1024), first.state).rpm, null);
+    });
+
+    it('emits nothing, not zero, when the crank stops', () => {
+        // A stopped crank repeats its last event, so there is no delta to
+        // compute. Callers see readings stop rather than a 0 rpm reading —
+        // the README tells them to treat a stale cadence as zero.
+        const first = parseCadenceMeasurement(crankView(40, 5000), initialCadenceState);
+        const repeat = parseCadenceMeasurement(crankView(40, 5000), first.state);
+        assert.equal(repeat.rpm, null);
+    });
+
+    it('does not mutate the state it was given', () => {
+        const state = { lastCrankRevs: 10, lastCrankTime: 1024 };
+        parseCadenceMeasurement(crankView(11, 2048), state);
+        assert.deepEqual(state, { lastCrankRevs: 10, lastCrankTime: 1024 });
+    });
+
     it('returns null but still advances state when time does not move', () => {
         const first = parseCadenceMeasurement(crankView(10, 1024), initialCadenceState);
         const second = parseCadenceMeasurement(crankView(11, 1024), first.state);

@@ -25,9 +25,13 @@ function ftmsView(flags: number, fields: { size: 2 | 3; value: number; signed?: 
 }
 
 const MORE_DATA = 1 << 0;
+const AVG_SPEED = 1 << 1;
 const INST_CADENCE = 1 << 2;
+const AVG_CADENCE = 1 << 3;
 const TOTAL_DISTANCE = 1 << 4;
+const RESISTANCE = 1 << 5;
 const INST_POWER = 1 << 6;
+const AVG_POWER = 1 << 7;
 
 describe('parseIndoorBikeData', () => {
     it('reads power when only the power flag is set', () => {
@@ -79,5 +83,61 @@ describe('parseIndoorBikeData', () => {
         const result = parseIndoorBikeData(v);
         assert.equal(result.cadenceRpm, null);
         assert.equal(result.powerW, 100, 'power is still read after a rejected cadence');
+    });
+
+    it('walks every optional field that precedes power', () => {
+        // Each skipped field holds a distinct value, so a skip of the wrong
+        // width lands power or cadence on a neighbour and the assertion fails.
+        // Resistance Level is 2 bytes (sint16) per FTMS v1.0; see indoor-bike.ts.
+        const v = ftmsView(AVG_SPEED | INST_CADENCE | AVG_CADENCE | TOTAL_DISTANCE | RESISTANCE | INST_POWER, [
+            { size: 2, value: 1111 }, // instantaneous speed (More Data clear)
+            { size: 2, value: 2222 }, // average speed
+            { size: 2, value: 170 }, // instantaneous cadence -> 85 rpm
+            { size: 2, value: 3333 }, // average cadence
+            { size: 3, value: 0x0a0b0c }, // total distance
+            { size: 2, value: -7, signed: true }, // resistance level
+            { size: 2, value: 321, signed: true }, // instantaneous power
+        ]);
+        assert.deepEqual(parseIndoorBikeData(v), { powerW: 321, cadenceRpm: 85 });
+    });
+
+    for (const [name, flag, width] of [
+        ['average speed', AVG_SPEED, 2],
+        ['average cadence', AVG_CADENCE, 2],
+        ['resistance level', RESISTANCE, 2],
+    ] as const) {
+        it(`skips ${name} on its own`, () => {
+            const v = ftmsView(MORE_DATA | flag | INST_POWER, [
+                { size: width, value: 0x7777 },
+                { size: 2, value: 205, signed: true },
+            ]);
+            assert.equal(parseIndoorBikeData(v).powerW, 205);
+        });
+    }
+
+    it('ignores fields that follow power', () => {
+        const v = ftmsView(MORE_DATA | INST_POWER | AVG_POWER, [
+            { size: 2, value: 230, signed: true },
+            { size: 2, value: 999, signed: true }, // average power
+        ]);
+        assert.equal(parseIndoorBikeData(v).powerW, 230);
+    });
+
+    it('rounds half-rpm cadence and accepts values just under the ceiling', () => {
+        const half = ftmsView(MORE_DATA | INST_CADENCE, [{ size: 2, value: 171 }]); // 85.5 rpm
+        assert.equal(parseIndoorBikeData(half).cadenceRpm, 86);
+
+        const justUnder = ftmsView(MORE_DATA | INST_CADENCE, [{ size: 2, value: 598 }]); // 299 rpm
+        assert.equal(parseIndoorBikeData(justUnder).cadenceRpm, 299);
+
+        const atCeiling = ftmsView(MORE_DATA | INST_CADENCE, [{ size: 2, value: 600 }]); // 300 rpm
+        assert.equal(parseIndoorBikeData(atCeiling).cadenceRpm, null);
+    });
+
+    it('throws a RangeError when a flagged field is missing from the packet', () => {
+        // The connect layer catches this and logs a malformed packet; direct
+        // users of the parser have to catch it themselves.
+        const truncated = ftmsView(MORE_DATA | INST_POWER, []);
+        assert.throws(() => parseIndoorBikeData(truncated), RangeError);
     });
 });

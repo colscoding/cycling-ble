@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { connectPower, connectHeartRate, connectCadence } from '../src/connect.js';
-import type { SensorReading } from '../src/types.js';
+import { classifyBluetoothError } from '../src/errors.js';
+import type { BluetoothAdapter, ConnectionStatus, SensorReading } from '../src/types.js';
 import {
     FakeCharacteristic,
     createFakeBluetooth,
@@ -9,6 +10,8 @@ import {
     indoorBikePacket,
     heartRatePacket,
     cscPacket,
+    recordingLogger,
+    waitFor,
 } from './helpers/fake-bluetooth.js';
 
 const CYCLING_POWER = 'cycling_power';
@@ -409,5 +412,276 @@ describe('connectCadence', () => {
         // stale state would compute a huge bogus delta from this single sample.
         char.emit(cscPacket(400, 60000));
         assert.equal(readings.length, 1, 'the first sample after reconnect yields nothing');
+    });
+});
+
+describe('every connect function', () => {
+    const cases = [
+        {
+            name: 'connectPower',
+            fn: connectPower,
+            services: [CYCLING_POWER, FITNESS_MACHINE],
+            fallback: 'Power Sensor',
+        },
+        { name: 'connectHeartRate', fn: connectHeartRate, services: [HEART_RATE], fallback: 'Heart Rate Monitor' },
+        {
+            name: 'connectCadence',
+            fn: connectCadence,
+            services: ['cycling_speed_and_cadence'],
+            fallback: 'Cadence Sensor',
+        },
+    ];
+
+    for (const { name, fn, services, fallback } of cases) {
+        it(`${name} asks the chooser only for its own services`, async () => {
+            const fake = createFakeBluetooth({ services: {} });
+            await assert.rejects(() => fn({ bluetooth: fake.bluetooth }));
+            const call = fake.requestDeviceCalls[0]!;
+            assert.deepEqual(
+                call.filters,
+                services.map((s) => ({ services: [s] }))
+            );
+            assert.deepEqual(call.optionalServices, services);
+        });
+
+        it(`${name} rejects with an error classified as incompatible when no service matches`, async () => {
+            const fake = createFakeBluetooth({ deviceName: undefined, services: {} });
+            await assert.rejects(
+                () => fn({ bluetooth: fake.bluetooth }),
+                (error) => classifyBluetoothError(error).kind === 'incompatible'
+            );
+        });
+
+        it(`${name} names an anonymous device "${fallback}"`, async () => {
+            const [serviceUuid] = services;
+            const characteristicUuid = {
+                [CYCLING_POWER]: CYCLING_POWER_MEASUREMENT,
+                [HEART_RATE]: HEART_RATE_MEASUREMENT,
+                cycling_speed_and_cadence: 'csc_measurement',
+            }[serviceUuid!]!;
+            const fake = createFakeBluetooth({
+                deviceName: undefined,
+                services: { [serviceUuid!]: { [characteristicUuid]: new FakeCharacteristic(characteristicUuid) } },
+            });
+            const conn = await fn({ bluetooth: fake.bluetooth });
+            assert.equal(conn.deviceName, fallback);
+            conn.disconnect();
+        });
+    }
+});
+
+describe('connection setup edge cases', () => {
+    it('propagates a cancelled chooser unchanged and attaches nothing', async () => {
+        const cancelled = new Error('User cancelled the requestDevice() chooser.');
+        cancelled.name = 'NotFoundError';
+        const fake = createFakeBluetooth({ services: {}, rejectRequest: cancelled });
+
+        await assert.rejects(
+            () => connectPower({ bluetooth: fake.bluetooth }),
+            (error) => error === cancelled
+        );
+        assert.equal(classifyBluetoothError(cancelled).kind, 'cancelled');
+        assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
+    });
+
+    it('throws an error classified as unavailable when there is no Bluetooth', async () => {
+        await assert.rejects(
+            () => connectPower({ bluetooth: undefined as unknown as BluetoothAdapter }),
+            (error) => classifyBluetoothError(error).kind === 'unavailable'
+        );
+    });
+
+    it('rejects when the chosen device has no GATT server', async () => {
+        const fake = powerMeterSetup();
+        Object.defineProperty(fake.device, 'gatt', { value: undefined });
+        await assert.rejects(() => connectPower({ bluetooth: fake.bluetooth }), /GATT server not available/);
+    });
+
+    it('omits deviceId when the platform exposes none', async () => {
+        const fake = createFakeBluetooth({
+            deviceId: '',
+            services: {
+                [CYCLING_POWER]: { [CYCLING_POWER_MEASUREMENT]: new FakeCharacteristic(CYCLING_POWER_MEASUREMENT) },
+            },
+        });
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        assert.equal('deviceId' in conn, false, 'an omitted key, not an empty string');
+    });
+
+    it('rejects without prompting when getDevices() is unavailable, and says why in the log', async () => {
+        const fake = powerMeterSetup();
+        const { logger, calls } = recordingLogger();
+        const bluetooth: BluetoothAdapter = { requestDevice: fake.bluetooth.requestDevice };
+
+        await assert.rejects(
+            () => connectPower({ bluetooth, logger, previousDeviceId: 'fake-device-1' }),
+            /not found in the permitted device list/
+        );
+        assert.equal(fake.requestDeviceCalls.length, 0, 'no chooser prompt');
+        assert.match(calls.debug.join('\n'), /getDevices\(\) is unavailable/);
+    });
+
+    it('rejects and warns when getDevices() itself fails', async () => {
+        const fake = powerMeterSetup();
+        const { logger, calls } = recordingLogger();
+        const bluetooth: BluetoothAdapter = {
+            requestDevice: fake.bluetooth.requestDevice,
+            getDevices: async () => {
+                throw new Error('permissions backend unavailable');
+            },
+        };
+
+        await assert.rejects(
+            () => connectPower({ bluetooth, logger, previousDeviceId: 'fake-device-1' }),
+            /not found in the permitted device list/
+        );
+        assert.equal(calls.warn.length, 1, 'the lookup failure is not silently reported as "not found"');
+    });
+});
+
+describe('notifications', () => {
+    it('ignores a notification that carries no value', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+
+        fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).emit(undefined);
+        assert.equal(readings.length, 0);
+    });
+
+    it('delivers each reading to every listener', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const a: SensorReading[] = [];
+        const b: SensorReading[] = [];
+        conn.addListener((r) => a.push(r));
+        conn.addListener((r) => b.push(r));
+
+        fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).emit(powerPacket(180));
+        assert.equal(a.length, 1);
+        assert.equal(b[0], a[0], 'the same frame object, not a copy per listener');
+    });
+
+    it('emits nothing for an FTMS packet with neither power nor cadence', async () => {
+        const fake = ftmsTrainerSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+
+        const speedOnly = new DataView(new ArrayBuffer(4)); // flags 0: instantaneous speed only
+        speedOnly.setUint16(2, 3000, true);
+        fake.characteristic(FITNESS_MACHINE, INDOOR_BIKE_DATA).emit(speedOnly);
+        assert.equal(readings.length, 0, 'an empty frame is not a reading');
+    });
+
+    it('omits the cadence key when an FTMS packet carries only power', async () => {
+        const fake = ftmsTrainerSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+
+        const powerOnly = new DataView(new ArrayBuffer(4));
+        powerOnly.setUint16(0, (1 << 0) | (1 << 6), true);
+        powerOnly.setInt16(2, 199, true);
+        fake.characteristic(FITNESS_MACHINE, INDOOR_BIKE_DATA).emit(powerOnly);
+
+        assert.equal(readings[0]!.power, 199);
+        assert.equal('cadence' in readings[0]!, false);
+    });
+
+    it('omits the power key when an FTMS packet carries only cadence', async () => {
+        const fake = ftmsTrainerSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+
+        const cadenceOnly = new DataView(new ArrayBuffer(4));
+        cadenceOnly.setUint16(0, (1 << 0) | (1 << 2), true);
+        cadenceOnly.setUint16(2, 160, true);
+        fake.characteristic(FITNESS_MACHINE, INDOOR_BIKE_DATA).emit(cadenceOnly);
+
+        assert.equal(readings[0]!.cadence, 80);
+        assert.equal('power' in readings[0]!, false);
+    });
+});
+
+describe('connection lifecycle', () => {
+    it('reports disconnected, reconnecting, then connected across a drop', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2 } });
+        const statuses: ConnectionStatus[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        fake.device.dropConnection();
+        await waitFor(() => statuses.includes('connected'), 1000, "'connected'");
+
+        assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'connected']);
+        conn.disconnect();
+    });
+
+    it('reports failed once reconnection gives up', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
+        const statuses: ConnectionStatus[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        fake.device.gatt.getPrimaryService = async () => {
+            throw new Error('GATT operation failed');
+        };
+        fake.device.dropConnection();
+        await waitFor(() => statuses.includes('failed'), 1000, "'failed'");
+
+        assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'reconnecting', 'failed']);
+        conn.disconnect();
+    });
+
+    it('gives a later drop a full set of attempts after a successful reconnect', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 1 } });
+        const statuses: ConnectionStatus[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        fake.device.dropConnection();
+        await waitFor(() => statuses.filter((s) => s === 'connected').length === 1, 1000, 'first reconnect');
+        fake.device.dropConnection();
+        await waitFor(() => statuses.filter((s) => s === 'connected').length === 2, 1000, 'second reconnect');
+
+        assert.equal(statuses.includes('failed'), false, 'the single attempt was not used up by the first drop');
+        conn.disconnect();
+    });
+
+    it('reports disconnected when the caller disconnects', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const statuses: ConnectionStatus[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        conn.disconnect();
+        assert.deepEqual(statuses, ['disconnected']);
+        assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
+    });
+
+    it('stops notifying a status listener once unsubscribed', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const statuses: ConnectionStatus[] = [];
+        const off = conn.onStatusChange((s) => statuses.push(s));
+
+        off();
+        conn.disconnect();
+        assert.deepEqual(statuses, []);
+    });
+
+    it('logs rather than throws when stopNotifications() fails during disconnect', async () => {
+        const fake = powerMeterSetup();
+        const { logger, calls } = recordingLogger();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, logger });
+        fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).stopNotifications = async () => {
+            throw new Error('GATT Server is disconnected');
+        };
+
+        assert.doesNotThrow(() => conn.disconnect());
+        await waitFor(() => calls.debug.some((m) => m.includes('stopNotifications failed')), 1000, 'debug log');
     });
 });

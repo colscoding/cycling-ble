@@ -25,4 +25,13 @@ describe('parseHeartRateMeasurement', () => {
         // 0x06 sets sensor-contact bits but leaves the format bit clear.
         assert.equal(parseHeartRateMeasurement(view([0x06, 65])), 65);
     });
+
+    it('ignores trailing energy and RR-interval fields', () => {
+        // 0x10 flags RR intervals present; they follow the value and are unused.
+        assert.equal(parseHeartRateMeasurement(view([0x10, 58, 0x00, 0x04, 0x10, 0x04])), 58);
+    });
+
+    it('throws a RangeError when the uint16 value is truncated', () => {
+        assert.throws(() => parseHeartRateMeasurement(view([0x01, 0x2c])), RangeError);
+    });
 });

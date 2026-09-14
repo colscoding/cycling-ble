@@ -31,4 +31,33 @@ describe('public surface', () => {
     it('does not leak internals from the root entry', () => {
         assert.equal('createReconnectionManager' in api, false);
     });
+
+    // Exact runtime surfaces. Adding or removing an export is a semver
+    // decision, so it should take a deliberate edit here rather than slip in.
+    it('root entry exports exactly the documented values', () => {
+        assert.deepEqual(Object.keys(api).sort(), [
+            'classifyBluetoothError',
+            'connectCadence',
+            'connectHeartRate',
+            'connectPower',
+        ]);
+    });
+
+    it('parsers entry exports exactly the documented values', () => {
+        assert.deepEqual(Object.keys(parsers).sort(), [
+            'initialCadenceState',
+            'parseCadenceMeasurement',
+            'parseHeartRateMeasurement',
+            'parseIndoorBikeData',
+            'parsePowerMeasurement',
+        ]);
+    });
+
+    it('mock entry exports exactly the documented values', () => {
+        assert.deepEqual(Object.keys(mock).sort(), [
+            'createMockCadenceSensor',
+            'createMockHeartRateSensor',
+            'createMockPowerSensor',
+        ]);
+    });
 });

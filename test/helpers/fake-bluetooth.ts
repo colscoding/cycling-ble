@@ -37,7 +37,7 @@ export class FakeCharacteristic {
     }
 
     /** Deliver a notification exactly as the browser would. */
-    emit(value: DataView): void {
+    emit(value: DataView | undefined): void {
         this.value = value;
         const event = { target: this } as unknown as Event;
         for (const listener of [...this.listeners]) listener(event);
@@ -177,6 +177,38 @@ export function createFakeBluetooth(setup: FakeBluetoothSetup): FakeBluetooth {
         },
     };
 }
+
+/**
+ * Resolve once `predicate` holds, polling every few milliseconds; reject after
+ * `timeoutMs`. Prefer this over a fixed sleep: it finishes as soon as the
+ * condition is met, and a slow CI machine gets the whole timeout, not a guess.
+ */
+export async function waitFor(predicate: () => boolean, timeoutMs = 1000, what = 'condition'): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+        if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}`);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+}
+
+/** A logger that records every call, by level. */
+export function recordingLogger(): {
+    logger: { debug: Log; info: Log; warn: Log; error: Log };
+    calls: Record<'debug' | 'info' | 'warn' | 'error', string[]>;
+} {
+    const calls = { debug: [] as string[], info: [] as string[], warn: [] as string[], error: [] as string[] };
+    return {
+        calls,
+        logger: {
+            debug: (m) => calls.debug.push(m),
+            info: (m) => calls.info.push(m),
+            warn: (m) => calls.warn.push(m),
+            error: (m) => calls.error.push(m),
+        },
+    };
+}
+
+type Log = (message: string, ...args: unknown[]) => void;
 
 /** A Cycling Power Measurement payload carrying the given watts. */
 export function powerPacket(watts: number): DataView {

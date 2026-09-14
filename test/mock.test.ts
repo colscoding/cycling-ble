@@ -101,6 +101,50 @@ describe('mock sensors', () => {
         assert.equal(readings.length, 0);
     });
 
+    it('stops notifying a status listener once unsubscribed', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: string[] = [];
+        const off = sensor.onStatusChange((s) => statuses.push(s));
+        off();
+        sensor.disconnect();
+        assert.deepEqual(statuses, []);
+    });
+
+    it('delivers each reading to every listener', () => {
+        const sensor = createMockHeartRateSensor({ autoStart: false });
+        const a: SensorReading[] = [];
+        const b: SensorReading[] = [];
+        sensor.addListener((r) => a.push(r));
+        sensor.addListener((r) => b.push(r));
+        sensor.emit({ heartRate: 150 });
+        assert.equal(a.length, 1);
+        assert.equal(b[0], a[0]);
+        sensor.disconnect();
+    });
+
+    it('lets emit() carry several metrics in one frame, like an FTMS trainer', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const readings: SensorReading[] = [];
+        sensor.addListener((r) => readings.push(r));
+        sensor.emit({ power: 240, cadence: 92 });
+        assert.equal(readings[0]!.power, 240);
+        assert.equal(readings[0]!.cadence, 92);
+        sensor.disconnect();
+    });
+
+    it('uses a default device name per sensor type', () => {
+        const sensors = [
+            createMockPowerSensor({ autoStart: false }),
+            createMockHeartRateSensor({ autoStart: false }),
+            createMockCadenceSensor({ autoStart: false }),
+        ];
+        assert.deepEqual(
+            sensors.map((s) => s.deviceName),
+            ['Mock Power Sensor', 'Mock Heart Rate Monitor', 'Mock Cadence Sensor']
+        );
+        for (const s of sensors) s.disconnect();
+    });
+
     it('uses a custom device name', () => {
         const sensor = createMockPowerSensor({ deviceName: 'My Fake Meter', autoStart: false });
         assert.equal(sensor.deviceName, 'My Fake Meter');
