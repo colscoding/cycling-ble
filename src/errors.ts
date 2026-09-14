@@ -5,7 +5,8 @@
  *   worth showing.
  * - `unavailable` — no Bluetooth: unsupported browser, insecure context, or the
  *   adapter is off. Retrying will not help until something changes.
- * - `not-found` — the chooser found no matching device.
+ * - `not-found` — the chooser found no matching device, or a saved
+ *   `previousDeviceId` is no longer among the permitted devices.
  * - `connection-failed` — a device was chosen but the GATT connection failed.
  * - `permission-denied` — the browser or OS refused access.
  * - `timeout` — the connection attempt timed out or hit a network error.
