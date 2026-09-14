@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import * as api from '../src/index.js';
 import * as parsers from '../src/parsers/index.js';
 import * as mock from '../src/mock.js';
+import type { BluetoothAdapter, ConnectOptions } from '../src/index.js';
+
+// Type-only surface, checked by `pnpm run typecheck` rather than at runtime.
+// ConnectOptions.bluetooth is typed with BluetoothAdapter, so anyone writing a
+// polyfill or a fake needs to be able to name it.
+const adapterIsNameable: ConnectOptions['bluetooth'] = undefined as BluetoothAdapter | undefined;
+void adapterIsNameable;
 
 describe('public surface', () => {
     it('exports the three connect functions', () => {

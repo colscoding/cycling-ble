@@ -11,6 +11,7 @@ export { classifyBluetoothError } from './errors.js';
 export type { BluetoothErrorInfo, BluetoothErrorKind, ClassifyOptions } from './errors.js';
 
 export type {
+    BluetoothAdapter,
     ConnectOptions,
     ConnectionStatus,
     Logger,
