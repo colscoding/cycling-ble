@@ -151,3 +151,38 @@ describe('mock sensors', () => {
         sensor.disconnect();
     });
 });
+
+describe('mock sensor listeners that throw', () => {
+    // emit() is called by the test itself, so the error belongs to that
+    // caller: it is rethrown, but only after every listener has run.
+
+    it('delivers to every listener, then throws the first error from emit()', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const readings: SensorReading[] = [];
+        sensor.addListener(() => {
+            throw new Error('assertion inside a listener');
+        });
+        sensor.addListener((r) => readings.push(r));
+
+        assert.throws(() => sensor.emit({ power: 200 }), /assertion inside a listener/);
+        assert.equal(readings.length, 1);
+        sensor.disconnect();
+    });
+
+    it('notifies every status listener and still stops, then throws', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: string[] = [];
+        sensor.onStatusChange(() => {
+            throw new Error('ui bug');
+        });
+        sensor.onStatusChange((s) => statuses.push(s));
+
+        assert.throws(() => sensor.disconnect(), /ui bug/);
+        assert.deepEqual(statuses, ['disconnected']);
+
+        const readings: SensorReading[] = [];
+        sensor.addListener((r) => readings.push(r));
+        sensor.emit({ power: 1 });
+        assert.equal(readings.length, 0, 'the sensor is stopped regardless');
+    });
+});

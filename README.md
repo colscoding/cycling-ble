@@ -143,9 +143,11 @@ listener. `onStatusChange` reports what happens _after_ that:
 `disconnect()` on it to release the device, then connect afresh — with
 `previousDeviceId` if you kept it.
 
-Listeners run synchronously inside the Bluetooth event handler. Keep them
-quick, and do not let them throw — see the note under
-[Known limitations](#known-limitations).
+Listeners run synchronously inside the Bluetooth event handler, so keep them
+quick. A listener that throws does not stop the others or disturb
+reconnection: its error is passed to `reportError`, which puts it in the
+console like any uncaught error and fires the window `error` event. Where
+there is no `reportError`, as in Node, it is rethrown on a later tick.
 
 ### Reconnecting without a chooser
 
@@ -255,6 +257,11 @@ const manual = createMockPowerSensor({ autoStart: false });
 manual.emit({ power: 250 });
 ```
 
+Every listener receives each reading even if one throws. Unlike a real
+connection, a mock then rethrows the first error from `emit()` or
+`disconnect()`, so an assertion that fails inside a listener fails the test
+that called it.
+
 ## Implemented services
 
 | Service                   | UUID     | Characteristic            | Yields             |
@@ -277,9 +284,6 @@ resistance, pedal balance, and torque are parsed past but not reported.
   device, so `connectPower` and `connectCadence` on the same device share it.
   Calling `disconnect()` on one drops the link under the other, whose
   automatic reconnection then brings it back.
-- **Throwing listeners.** A listener that throws stops later listeners from
-  receiving that reading or status, and a status listener that throws can
-  disturb reconnection. Catch errors inside your listeners.
 - **FTMS Resistance Level width.** FTMS v1.0 gives this field as two bytes and
   the later Bluetooth specification supplement gives one. The parser follows
   FTMS v1.0. A trainer that follows the other reading _and_ reports resistance

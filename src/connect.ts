@@ -8,6 +8,7 @@ import type {
     SensorReading,
     StatusListener,
 } from './types.js';
+import { createListeners, reportError } from './listeners.js';
 import { noopLogger } from './logger.js';
 import { createReconnectionManager } from './reconnection.js';
 import {
@@ -104,14 +105,18 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     }
 
     const deviceName = device.name || config.defaultDeviceName;
-    const readingListeners = new Set<ReadingListener>();
-    const statusListeners = new Set<StatusListener>();
+    const readingListeners = createListeners<SensorReading>();
+    const statusListeners = createListeners<ConnectionStatus>();
 
     let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
     let parseValue: ValueParser = () => null;
 
+    // Neither a notification nor a reconnect has a caller to hand a listener's
+    // error back to. Reporting it instead of throwing also keeps the caller's
+    // bugs out of the reconnection logic: a throw from a 'connected' listener
+    // used to register as a failed attempt, and retried forever.
     const notifyStatus = (status: ConnectionStatus): void => {
-        for (const listener of [...statusListeners]) listener(status);
+        statusListeners.emit(status).forEach(reportError);
     };
 
     const reconnection = createReconnectionManager({
@@ -136,7 +141,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         if (!fields) return;
 
         const reading: SensorReading = { timestamp: Date.now(), ...fields };
-        for (const listener of [...readingListeners]) listener(reading);
+        readingListeners.emit(reading).forEach(reportError);
     };
 
     /**
@@ -220,17 +225,11 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         ...(device.id ? { deviceId: device.id } : {}),
 
         addListener(listener: ReadingListener): () => void {
-            readingListeners.add(listener);
-            return () => {
-                readingListeners.delete(listener);
-            };
+            return readingListeners.add(listener);
         },
 
         onStatusChange(listener: StatusListener): () => void {
-            statusListeners.add(listener);
-            return () => {
-                statusListeners.delete(listener);
-            };
+            return statusListeners.add(listener);
         },
 
         disconnect(): void {

@@ -10,6 +10,7 @@ import {
     indoorBikePacket,
     heartRatePacket,
     cscPacket,
+    captureReportedErrors,
     recordingLogger,
     waitFor,
 } from './helpers/fake-bluetooth.js';
@@ -683,5 +684,117 @@ describe('connection lifecycle', () => {
 
         assert.doesNotThrow(() => conn.disconnect());
         await waitFor(() => calls.debug.some((m) => m.includes('stopNotifications failed')), 1000, 'debug log');
+    });
+});
+
+describe('listeners that throw', () => {
+    // Listener code belongs to the caller, and UI code throws. A browser keeps
+    // dispatching an event to its other listeners when one throws, and reports
+    // the error; a connection has to behave the same, and must never let the
+    // caller's bug reach its own reconnection logic.
+
+    it('still delivers a reading to the other listeners, and reports the error', async () => {
+        const reported = captureReportedErrors();
+        try {
+            const fake = powerMeterSetup();
+            const conn = await connectPower({ bluetooth: fake.bluetooth });
+            const boom = new Error('ui bug');
+            const readings: SensorReading[] = [];
+            conn.addListener(() => {
+                throw boom;
+            });
+            conn.addListener((r) => readings.push(r));
+
+            assert.doesNotThrow(() =>
+                fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).emit(powerPacket(200))
+            );
+            assert.equal(readings.length, 1, 'the second listener is not starved');
+            assert.deepEqual(reported.errors, [boom]);
+        } finally {
+            reported.restore();
+        }
+    });
+
+    it("does not restart reconnection when a listener throws on 'connected'", async () => {
+        // The throw used to count as a failed attempt after the attempt counter
+        // had already been reset, so maxAttempts never ran out.
+        const reported = captureReportedErrors();
+        const fake = powerMeterSetup();
+        const conn = await connectPower({
+            bluetooth: fake.bluetooth,
+            reconnect: { baseDelayMs: 2, maxAttempts: 3 },
+        });
+        try {
+            const gatt = fake.device.gatt;
+            const realConnect = gatt.connect.bind(gatt);
+            let connectCalls = 0;
+            gatt.connect = async () => {
+                connectCalls++;
+                return realConnect();
+            };
+            const statuses: ConnectionStatus[] = [];
+            conn.onStatusChange((s) => {
+                if (s === 'connected') throw new Error('ui bug');
+            });
+            conn.onStatusChange((s) => statuses.push(s));
+
+            fake.device.dropConnection();
+            await waitFor(() => statuses.includes('connected'), 1000, "'connected'");
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            assert.equal(connectCalls, 1, 'one reconnect, not a loop');
+            assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'connected']);
+            assert.equal(reported.errors.length, 1);
+        } finally {
+            // Unconditionally: if the loop is back, it must not outlive the test.
+            conn.disconnect();
+            reported.restore();
+        }
+    });
+
+    it("still reconnects when a listener throws on 'disconnected'", async () => {
+        const reported = captureReportedErrors();
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2 } });
+        try {
+            conn.onStatusChange((s) => {
+                if (s === 'disconnected') throw new Error('ui bug');
+            });
+
+            assert.doesNotThrow(() => fake.device.dropConnection());
+            await waitFor(() => fake.device.gatt.connected, 1000, 'reconnect');
+            assert.equal(reported.errors.length, 1);
+        } finally {
+            conn.disconnect();
+            reported.restore();
+        }
+    });
+
+    it('rethrows on a later tick where there is no reportError, so the error is never lost', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        const readings: SensorReading[] = [];
+        conn.addListener(() => {
+            throw new Error('ui bug');
+        });
+        conn.addListener((r) => readings.push(r));
+
+        // Capture the scheduled callback instead of letting it run: thrown for
+        // real, it would be an uncaught exception in the test process.
+        const scheduled: (() => void)[] = [];
+        const realSetTimeout = globalThis.setTimeout;
+        globalThis.setTimeout = ((callback: () => void) => {
+            scheduled.push(callback);
+            return 0;
+        }) as unknown as typeof setTimeout;
+        try {
+            fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).emit(powerPacket(200));
+        } finally {
+            globalThis.setTimeout = realSetTimeout;
+        }
+
+        assert.equal(readings.length, 1, 'delivery finishes first');
+        assert.equal(scheduled.length, 1);
+        assert.throws(() => scheduled[0]!(), /ui bug/);
     });
 });

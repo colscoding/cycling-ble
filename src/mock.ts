@@ -6,6 +6,7 @@
  */
 
 import type { ConnectionStatus, ReadingListener, SensorConnection, SensorReading, StatusListener } from './types.js';
+import { createListeners } from './listeners.js';
 
 const DEFAULT_INTERVAL_MS = 1000;
 
@@ -35,19 +36,26 @@ function createMockSensor(
 ): MockSensorConnection {
     const { deviceName = defaultName, intervalMs = DEFAULT_INTERVAL_MS, autoStart = true } = options;
 
-    const readingListeners = new Set<ReadingListener>();
-    const statusListeners = new Set<StatusListener>();
+    const readingListeners = createListeners<SensorReading>();
+    const statusListeners = createListeners<ConnectionStatus>();
     let timer: ReturnType<typeof setInterval> | null = null;
     let disconnected = false;
 
+    // Unlike a real connection, the caller triggers delivery here — usually a
+    // test calling emit() — so a listener's error goes back to that caller, as
+    // an assertion failing inside a listener should. Every listener runs first.
+    const throwFirst = (errors: unknown[]): void => {
+        if (errors.length > 0) throw errors[0];
+    };
+
     const notifyStatus = (status: ConnectionStatus): void => {
-        for (const listener of [...statusListeners]) listener(status);
+        throwFirst(statusListeners.emit(status));
     };
 
     const emit = (fields: Omit<SensorReading, 'timestamp'>): void => {
         if (disconnected) return;
         const reading: SensorReading = { timestamp: Date.now(), ...fields };
-        for (const listener of [...readingListeners]) listener(reading);
+        throwFirst(readingListeners.emit(reading));
     };
 
     const start = (): void => {
@@ -71,16 +79,10 @@ function createMockSensor(
     return {
         deviceName,
         addListener(listener: ReadingListener): () => void {
-            readingListeners.add(listener);
-            return () => {
-                readingListeners.delete(listener);
-            };
+            return readingListeners.add(listener);
         },
         onStatusChange(listener: StatusListener): () => void {
-            statusListeners.add(listener);
-            return () => {
-                statusListeners.delete(listener);
-            };
+            return statusListeners.add(listener);
         },
         disconnect(): void {
             stop();

@@ -191,6 +191,25 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 1000, what =
     }
 }
 
+/**
+ * Install a `globalThis.reportError` that records what it is given, as a
+ * browser's would report it. Node has no reportError of its own, so call
+ * `restore()` to put it back to absent.
+ */
+export function captureReportedErrors(): { errors: unknown[]; restore: () => void } {
+    const target = globalThis as { reportError?: (error: unknown) => void };
+    const previous = target.reportError;
+    const errors: unknown[] = [];
+    target.reportError = (error) => errors.push(error);
+    return {
+        errors,
+        restore: () => {
+            if (previous === undefined) delete target.reportError;
+            else target.reportError = previous;
+        },
+    };
+}
+
 /** A logger that records every call, by level. */
 export function recordingLogger(): {
     logger: { debug: Log; info: Log; warn: Log; error: Log };
