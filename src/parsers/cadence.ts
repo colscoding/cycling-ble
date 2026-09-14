@@ -42,6 +42,12 @@ export interface CadenceParseResult {
  * Returns `null` rather than throwing whenever a sample yields no usable
  * value: the first sample after connecting, a packet without crank data, a
  * repeated event time, or an implausible result.
+ *
+ * A stopped crank repeats its last event, so pedalling stopping shows up as
+ * readings stopping — never as a 0 rpm result.
+ *
+ * @throws {RangeError} When the packet is too short for the fields its flags
+ * announce. That is a malformed packet, not an unusable sample.
  */
 export function parseCadenceMeasurement(value: DataView, state: CadenceState): CadenceParseResult {
     const flags = value.getUint8(0);

@@ -10,6 +10,8 @@ const FLAG_UINT16_FORMAT = 0x01;
  *
  * The flags byte declares the value width, so the field cannot be read at a
  * fixed offset and size.
+ *
+ * @throws {RangeError} When the packet is too short for the declared width.
  */
 export function parseHeartRateMeasurement(value: DataView): number {
     const flags = value.getUint8(0);

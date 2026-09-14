@@ -76,6 +76,11 @@ Connects to a Cycling Speed and Cadence Service (`0x1816`) sensor. Yields
 `cadence`. CSC reports cumulative crank counters, so the first notification
 after connecting produces no reading — RPM only exists as a delta.
 
+For the same reason, **a stopped crank produces no reading rather than a
+`0 rpm` one**: the sensor repeats its last crank event, and there is no delta
+to compute. If your UI shows cadence, treat a value that has not been updated
+for a few seconds as zero.
+
 ### `ConnectOptions`
 
 | Option             | Type                        | Default                 | Purpose                                                         |
@@ -84,6 +89,29 @@ after connecting produces no reading — RPM only exists as a delta.
 | `logger`           | `Logger`                    | no-op                   | Where the library logs; pass `console` to see it                |
 | `reconnect`        | `ReconnectOptions \| false` | 5 attempts, 1 s backoff | Automatic reconnection tuning, or `false` to handle it yourself |
 | `bluetooth`        | `BluetoothAdapter`          | `navigator.bluetooth`   | Supply a polyfill or a test fake                                |
+
+#### `ReconnectOptions`
+
+After an unexpected drop, the library waits, reconnects, and doubles the wait
+after each failure, up to a ceiling:
+
+| Option        | Default | Meaning                                         |
+| ------------- | ------- | ----------------------------------------------- |
+| `maxAttempts` | `5`     | Attempts before giving up and reporting failure |
+| `baseDelayMs` | `1000`  | Wait before the first attempt                   |
+| `maxDelayMs`  | `10000` | Ceiling on any single wait                      |
+
+With the defaults the waits are 1 s, 2 s, 4 s, 8 s, then 10 s — about 25
+seconds in total before `'failed'`. A successful reconnect restores the full
+budget for the next drop. For a long ride where giving up is never right, pass
+`maxAttempts: Infinity`.
+
+#### `Logger`
+
+Any object with `debug`, `info`, `warn`, and `error` methods taking
+`(message: string, ...args: unknown[])` — `console` qualifies. The library is
+silent by default. Malformed packets are logged at `warn` and dropped rather
+than thrown, so pass a logger if readings seem to be missing.
 
 ### `SensorConnection`
 
@@ -102,7 +130,22 @@ Both subscribe methods return an unsubscribe function.
 `ConnectionStatus` is `'connected' | 'disconnected' | 'reconnecting' | 'failed'`.
 Note that the initial connection is signalled by `connectPower()` resolving,
 not by a `'connected'` status event — that event fires before you can attach a
-listener. `onStatusChange` reports what happens _after_ that.
+listener. `onStatusChange` reports what happens _after_ that:
+
+| Situation                     | Statuses, in order                                            |
+| ----------------------------- | ------------------------------------------------------------- |
+| Drop, then a successful retry | `disconnected` → `reconnecting` → `connected`                 |
+| Drop, and every retry fails   | `disconnected` → `reconnecting` (once per attempt) → `failed` |
+| Drop with `reconnect: false`  | `disconnected`                                                |
+| You call `disconnect()`       | `disconnected`, and no reconnection follows                   |
+
+`'failed'` is final: that connection object will not try again. Call
+`disconnect()` on it to release the device, then connect afresh — with
+`previousDeviceId` if you kept it.
+
+Listeners run synchronously inside the Bluetooth event handler. Keep them
+quick, and do not let them throw — see the note under
+[Known limitations](#known-limitations).
 
 ### Reconnecting without a chooser
 
@@ -110,24 +153,37 @@ Persist `deviceId` and hand it back. The library never touches storage itself,
 so where you keep it is up to you:
 
 ```ts
+import { connectPower, type SensorConnection } from 'cycling-ble';
+
 const connection = await connectPower();
 if (connection.deviceId) {
     localStorage.setItem('powerDeviceId', connection.deviceId);
 }
 
-// Next session. Fall back to a normal chooser prompt if the saved device is
-// gone — connectPower rejects rather than prompting when it cannot find it.
-const saved = localStorage.getItem('powerDeviceId');
-try {
-    const reconnected = await connectPower(saved ? { previousDeviceId: saved } : {});
-} catch {
-    const fresh = await connectPower();
+// Next session. Try the saved device first, and fall back to the chooser if
+// it is gone — connectPower rejects rather than prompting when it cannot
+// find it.
+async function connectRemembered(): Promise<SensorConnection> {
+    const saved = localStorage.getItem('powerDeviceId');
+    if (saved) {
+        try {
+            return await connectPower({ previousDeviceId: saved });
+        } catch {
+            localStorage.removeItem('powerDeviceId');
+        }
+    }
+    return connectPower();
 }
 ```
 
 This relies on `navigator.bluetooth.getDevices()`, which requires the user to
 have previously granted access to that device. It rejects rather than falling
 back to a chooser prompt, so you can tell the two situations apart.
+
+The chooser still needs a user gesture. A saved device that is switched off or
+out of range can take a while to fail, and by then the browser may no longer
+treat the click as recent enough to open a chooser. If the fallback is refused,
+show a "Choose a sensor" button rather than retrying automatically.
 
 ### `classifyBluetoothError(error, options?)`
 
@@ -174,6 +230,10 @@ const result = parseCadenceMeasurement(dataView, state);
 state = result.state;
 ```
 
+Every parser throws a `RangeError` when a packet is shorter than its flags say
+it should be. The connect functions catch that and log it; if you call a parser
+directly, catch it yourself. Parsers never mutate the `state` they are given.
+
 ### `cycling-ble/mock`
 
 Simulated sensors with the same shape as a real connection, for demos, UI work
@@ -207,6 +267,24 @@ manual.emit({ power: 250 });
 Only instantaneous power and cadence are decoded. Speed, distance,
 resistance, pedal balance, and torque are parsed past but not reported.
 
+## Known limitations
+
+- **Cadence from a power meter.** Many crank power meters report cadence
+  inside the Cycling Power Measurement rather than through a separate CSC
+  service. That field is not decoded yet, so `connectPower` yields only
+  `power` from such a meter.
+- **One device, two connections.** A page has one GATT connection per physical
+  device, so `connectPower` and `connectCadence` on the same device share it.
+  Calling `disconnect()` on one drops the link under the other, whose
+  automatic reconnection then brings it back.
+- **Throwing listeners.** A listener that throws stops later listeners from
+  receiving that reading or status, and a status listener that throws can
+  disturb reconnection. Catch errors inside your listeners.
+- **FTMS Resistance Level width.** FTMS v1.0 gives this field as two bytes and
+  the later Bluetooth specification supplement gives one. The parser follows
+  FTMS v1.0. A trainer that follows the other reading _and_ reports resistance
+  would decode power incorrectly. No such trainer has been reported.
+
 ## Tested on
 
 The library is covered by a test suite that drives a simulated GATT stack, and
@@ -218,6 +296,24 @@ actually been ridden with. If your sensor works — or doesn't — an issue sayi
 which model would genuinely help.
 
 - _(none recorded yet)_
+
+## Development
+
+Requires Node 22 or later and pnpm (the version is pinned in `package.json`).
+
+```sh
+pnpm install
+pnpm test               # run the suite
+pnpm run test:coverage  # run it with coverage, failing below the thresholds
+pnpm run check          # everything CI runs: types, lint, format, coverage, build
+```
+
+Tests use Node's built-in runner. `test/helpers/fake-bluetooth.ts` fakes the
+small slice of Web Bluetooth the connect layer touches, so connection,
+reconnection, and teardown logic run without a browser or a sensor. Parser
+tests build packets byte by byte from the Bluetooth specifications.
+
+Releases are published to npm by CI when a `v*` tag is pushed.
 
 ## License
 

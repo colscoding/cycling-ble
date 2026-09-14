@@ -19,6 +19,12 @@ const FLAG_AVG_SPEED = 1 << 1;
 const FLAG_INST_CADENCE = 1 << 2;
 const FLAG_AVG_CADENCE = 1 << 3;
 const FLAG_TOTAL_DISTANCE = 1 << 4;
+/**
+ * Resistance Level is skipped as 2 bytes (sint16), per FTMS v1.0. The later
+ * GATT Specification Supplement lists it as uint8. The two cannot both be
+ * right, and a trainer following the other reading would shift the power
+ * field by one byte — unconfirmed against real hardware.
+ */
 const FLAG_RESISTANCE = 1 << 5;
 const FLAG_INST_POWER = 1 << 6;
 
@@ -39,6 +45,9 @@ export interface IndoorBikeParseResult {
  * The uint16 flags field declares which optional fields follow, in a fixed
  * order. Fields we do not use still have to be walked past to find the ones we
  * do, so every skip below is load-bearing.
+ *
+ * @throws {RangeError} When the flags announce a field the packet is too short
+ * to hold.
  */
 export function parseIndoorBikeData(value: DataView): IndoorBikeParseResult {
     const flags = value.getUint16(0, true);

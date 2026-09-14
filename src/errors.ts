@@ -1,12 +1,17 @@
 /**
- * Classify a Web Bluetooth failure into something a user interface can render.
+ * Stable category of a Web Bluetooth failure.
  *
- * Browsers disagree on both the `name` and the wording of these errors, so
- * classification is message-sniffing by necessity. The branch order matters:
- * a `NotFoundError` means a cancelled chooser when its message mentions
- * cancellation, and nothing-found otherwise.
+ * - `cancelled` — the user dismissed the device chooser. Usually not an error
+ *   worth showing.
+ * - `unavailable` — no Bluetooth: unsupported browser, insecure context, or the
+ *   adapter is off. Retrying will not help until something changes.
+ * - `not-found` — the chooser found no matching device.
+ * - `connection-failed` — a device was chosen but the GATT connection failed.
+ * - `permission-denied` — the browser or OS refused access.
+ * - `timeout` — the connection attempt timed out or hit a network error.
+ * - `incompatible` — the device lacks the service this sensor type needs.
+ * - `unknown` — none of the above matched.
  */
-
 export type BluetoothErrorKind =
     | 'cancelled'
     | 'unavailable'
@@ -35,6 +40,25 @@ export interface ClassifyOptions {
     sensorLabel?: string;
 }
 
+/**
+ * Classify a Web Bluetooth failure into something a user interface can render.
+ *
+ * Accepts anything a `catch` can receive. Errors thrown by this package's own
+ * connect functions are recognised as well as browser errors.
+ *
+ * Browsers disagree on both the `name` and the wording of these errors, so
+ * classification is message-sniffing by necessity. The branch order matters:
+ * a `NotFoundError` means a cancelled chooser when its message mentions
+ * cancellation, and nothing-found otherwise.
+ *
+ * @example
+ * try {
+ *     await connectPower();
+ * } catch (error) {
+ *     const info = classifyBluetoothError(error, { sensorLabel: 'power meter' });
+ *     if (info.kind !== 'cancelled') showError(info.title, info.message);
+ * }
+ */
 export function classifyBluetoothError(error: unknown, options: ClassifyOptions = {}): BluetoothErrorInfo {
     const label = options.sensorLabel ?? 'sensor';
     const text = error instanceof Error ? error.message : String(error);
