@@ -90,6 +90,18 @@ describe('createReconnectionManager', () => {
         assert.equal(calls, 0, 'the connect fn never runs after cancellation');
     });
 
+    it('stops retrying when cancelled while a failing attempt is in flight', async () => {
+        const m = make({ maxAttempts: 5, baseDelayMs: 1 });
+        let calls = 0;
+        await m.attemptReconnect(async () => {
+            calls++;
+            m.cancel();
+            throw new Error('failed after the caller gave up');
+        });
+        assert.equal(calls, 1, 'no further attempt once cancelled');
+        assert.deepEqual(statuses, ['reconnecting'], 'and no failure announced for a cancelled cycle');
+    });
+
     it('reset clears the attempt counter and the manual flag', async () => {
         const m = make();
         m.markManualDisconnect();

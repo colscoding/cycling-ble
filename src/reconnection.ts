@@ -66,35 +66,36 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
         });
 
     const attemptReconnect = async (connectFn: () => Promise<void>): Promise<void> => {
+        // A loop rather than a retry that awaits itself: with maxAttempts set to
+        // Infinity, recursion would chain one more pending promise per failed
+        // attempt for as long as the outage lasts.
         // markManualDisconnect() cancels as well, so `cancelled` covers it.
-        if (!enabled || cancelled) return;
+        while (enabled && !cancelled) {
+            if (attempts >= maxAttempts) {
+                logger.error(`[${sensorName}] max reconnection attempts reached`);
+                gaveUp = true;
+                notify('failed');
+                return;
+            }
 
-        if (attempts >= maxAttempts) {
-            logger.error(`[${sensorName}] max reconnection attempts reached`);
-            gaveUp = true;
-            notify('failed');
-            return;
-        }
+            attempts++;
+            const delay = Math.min(baseDelayMs * 2 ** (attempts - 1), maxDelayMs);
+            logger.info(`[${sensorName}] reconnection attempt ${attempts}/${maxAttempts} in ${delay}ms`);
+            notify('reconnecting');
 
-        attempts++;
-        const delay = Math.min(baseDelayMs * 2 ** (attempts - 1), maxDelayMs);
-        logger.info(`[${sensorName}] reconnection attempt ${attempts}/${maxAttempts} in ${delay}ms`);
-        notify('reconnecting');
+            const proceed = await sleep(delay);
+            if (!proceed || cancelled) {
+                logger.info(`[${sensorName}] reconnection cancelled`);
+                return;
+            }
 
-        const proceed = await sleep(delay);
-        if (!proceed || cancelled) {
-            logger.info(`[${sensorName}] reconnection cancelled`);
-            return;
-        }
-
-        try {
-            await connectFn();
-            logger.info(`[${sensorName}] reconnected`);
-            attempts = 0;
-        } catch (error) {
-            logger.error(`[${sensorName}] reconnection failed:`, error);
-            if (!cancelled) {
-                await attemptReconnect(connectFn);
+            try {
+                await connectFn();
+                logger.info(`[${sensorName}] reconnected`);
+                attempts = 0;
+                return;
+            } catch (error) {
+                logger.error(`[${sensorName}] reconnection failed:`, error);
             }
         }
     };
