@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockPowerSensor, createMockHeartRateSensor, createMockCadenceSensor } from '../src/mock.js';
 import type { SensorReading } from '../src/types.js';
+import { waitFor } from './helpers/fake-bluetooth.js';
 
 describe('mock sensors', () => {
     it('satisfies the SensorConnection shape', () => {
@@ -39,9 +40,8 @@ describe('mock sensors', () => {
         const sensor = createMockPowerSensor({ intervalMs: 5 });
         const readings: SensorReading[] = [];
         sensor.addListener((r) => readings.push(r));
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await waitFor(() => readings.length >= 2, 1000, 'two readings');
         sensor.disconnect();
-        assert.ok(readings.length >= 2, 'emits repeatedly');
         for (const r of readings) {
             assert.ok(r.power !== undefined && r.power >= 200 && r.power <= 250);
         }
@@ -51,7 +51,8 @@ describe('mock sensors', () => {
         const sensor = createMockHeartRateSensor({ intervalMs: 5 });
         const readings: SensorReading[] = [];
         sensor.addListener((r) => readings.push(r));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        // every() is true for an empty array, so first make sure there is something to check.
+        await waitFor(() => readings.length >= 2, 1000, 'two readings');
         sensor.disconnect();
         assert.ok(readings.every((r) => r.heartRate !== undefined && r.heartRate >= 140 && r.heartRate <= 160));
     });
@@ -60,7 +61,7 @@ describe('mock sensors', () => {
         const sensor = createMockCadenceSensor({ intervalMs: 5 });
         const readings: SensorReading[] = [];
         sensor.addListener((r) => readings.push(r));
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await waitFor(() => readings.length >= 2, 1000, 'two readings');
         sensor.disconnect();
         assert.ok(readings.every((r) => r.cadence !== undefined && r.cadence >= 80 && r.cadence <= 100));
     });

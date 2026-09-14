@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createReconnectionManager, type ReconnectionManager } from '../src/reconnection.js';
 import type { ConnectionStatus } from '../src/types.js';
-import { recordingLogger } from './helpers/fake-bluetooth.js';
+import { recordingLogger, waitFor } from './helpers/fake-bluetooth.js';
 
 describe('createReconnectionManager', () => {
     let manager: ReconnectionManager;
@@ -43,7 +43,7 @@ describe('createReconnectionManager', () => {
             calls++;
             throw new Error('nope');
         });
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        // attemptReconnect resolves only once the cycle has ended.
         assert.equal(calls, 2, 'stops after two attempts');
         assert.ok(statuses.includes('failed'), 'reports failure');
     });
@@ -74,9 +74,8 @@ describe('createReconnectionManager', () => {
         m.handleDisconnect(async () => {
             calls++;
         });
-        await new Promise((resolve) => setTimeout(resolve, 60));
+        await waitFor(() => calls === 1, 1000, 'the reconnect');
         assert.equal(statuses[0], 'disconnected');
-        assert.equal(calls, 1);
     });
 
     it('cancel stops a pending retry', async () => {
@@ -215,8 +214,7 @@ describe('createReconnectionManager', () => {
         m.handleDisconnect(async () => {
             calls++;
         });
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        assert.equal(calls, 1);
+        await waitFor(() => calls === 1, 1000, 'the reconnect');
     });
 
     it('never reconnects when reconnection is disabled', async () => {

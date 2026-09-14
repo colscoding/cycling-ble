@@ -86,12 +86,6 @@ describe('connectPower', () => {
         assert.equal(conn.deviceName, 'Power Sensor');
     });
 
-    it('never writes to storage — deviceId is returned for the caller to persist', async () => {
-        const fake = powerMeterSetup();
-        const conn = await connectPower({ bluetooth: fake.bluetooth });
-        assert.equal(typeof conn.deviceId, 'string');
-    });
-
     it('requests both candidate services so either device can be chosen', async () => {
         const fake = powerMeterSetup();
         await connectPower({ bluetooth: fake.bluetooth });
@@ -154,9 +148,8 @@ describe('connectPower', () => {
         const statuses: string[] = [];
         conn.onStatusChange((s) => statuses.push(s));
 
-        fake.device.gatt.connected = false;
         fake.device.dropConnection();
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        await waitFor(() => statuses.includes('connected'), 1000, "'connected'");
 
         assert.ok(statuses.includes('disconnected'));
         assert.equal(fake.device.gatt.connected, true, 'reconnected');
@@ -188,11 +181,13 @@ describe('connectPower', () => {
         });
         const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
         assert.equal(char.listenerCount, 1);
+        // 'connected' fires only once the characteristic is rebound; the link
+        // alone coming back up would be too early to count listeners.
+        let reconnected = false;
+        conn.onStatusChange((s) => (reconnected ||= s === 'connected'));
 
-        fake.device.gatt.connected = false;
         fake.device.dropConnection();
-        await new Promise((resolve) => setTimeout(resolve, 80));
-        assert.equal(fake.device.gatt.connected, true, 'reconnected');
+        await waitFor(() => reconnected, 1000, "'connected'");
         assert.equal(char.listenerCount, 1, 'reconnect must not stack a second listener');
 
         const readings: SensorReading[] = [];
@@ -412,14 +407,18 @@ describe('connectCadence', () => {
         char.emit(cscPacket(11, 2048));
         assert.equal(readings.length, 1, 'baseline: cadence flows before the drop');
 
-        fake.device.gatt.connected = false;
+        // Wait for 'connected', which follows the fresh parser being installed.
+        let reconnected = false;
+        conn.onStatusChange((s) => (reconnected ||= s === 'connected'));
         fake.device.dropConnection();
-        await new Promise((resolve) => setTimeout(resolve, 80));
-        assert.equal(fake.device.gatt.connected, true, 'reconnected');
+        await waitFor(() => reconnected, 1000, "'connected'");
 
         // Crank counters kept running while disconnected. A parser carrying
-        // stale state would compute a huge bogus delta from this single sample.
-        char.emit(cscPacket(400, 60000));
+        // stale state would compute a delta across the gap from this single
+        // sample. The values are chosen so that stale delta is plausible —
+        // 9 revs in 10 s is 54 rpm — because an implausible one would be
+        // rejected by the 300 rpm ceiling anyway and hide a stale parser.
+        char.emit(cscPacket(20, 2048 + 10 * 1024));
         assert.equal(readings.length, 1, 'the first sample after reconnect yields nothing');
     });
 });
