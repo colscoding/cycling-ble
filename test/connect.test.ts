@@ -637,6 +637,30 @@ describe('connection lifecycle', () => {
         conn.disconnect();
     });
 
+    it('closes the link when a reconnect attempt fails part-way', async () => {
+        // gatt.connect() can succeed and service discovery still fail. Left
+        // open, that link ties the sensor to this browser after 'failed', so
+        // no other app or device can connect to it.
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
+        const statuses: ConnectionStatus[] = [];
+        conn.onStatusChange((s) => statuses.push(s));
+
+        fake.device.gatt.getPrimaryService = async () => {
+            throw new Error('GATT operation failed');
+        };
+        fake.device.dropConnection();
+        await waitFor(() => statuses.includes('failed'), 1000, "'failed'");
+
+        assert.equal(fake.device.gatt.connected, false, 'no half-open link after giving up');
+        assert.deepEqual(
+            statuses,
+            ['disconnected', 'reconnecting', 'reconnecting', 'failed'],
+            'closing its own link is not mistaken for another drop'
+        );
+        conn.disconnect();
+    });
+
     it('gives a later drop a full set of attempts after a successful reconnect', async () => {
         const fake = powerMeterSetup();
         const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 1 } });

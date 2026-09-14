@@ -13,7 +13,7 @@ export interface ReconnectionManager {
     /** Record that the caller asked to disconnect, suppressing reconnection. */
     markManualDisconnect(): void;
     isManualDisconnect(): boolean;
-    /** Clear the attempt counter and the manual and cancelled flags. */
+    /** Clear the attempt counter and the manual, cancelled, and gave-up flags. */
     reset(): void;
     /** Cancel any pending retry and stop reconnecting. */
     cancel(): void;
@@ -47,6 +47,8 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
     let reconnecting = false;
     let manualDisconnect = false;
     let cancelled = false;
+    /** Set once 'failed' is reported. Until reset(), further drops are ignored. */
+    let gaveUp = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let pendingResolve: ((proceed: boolean) => void) | null = null;
 
@@ -69,6 +71,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
 
         if (attempts >= maxAttempts) {
             logger.error(`[${sensorName}] max reconnection attempts reached`);
+            gaveUp = true;
             notify('failed');
             return;
         }
@@ -113,7 +116,9 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             // A browser can report the same drop more than once, and another can
             // arrive while a retry is already in flight. Without this guard each
             // event starts its own backoff chain and they race each other.
-            if (manualDisconnect || reconnecting) return;
+            // After giving up, a late event — such as the one fired by closing a
+            // half-open link — must not reopen a connection reported as failed.
+            if (manualDisconnect || reconnecting || gaveUp) return;
 
             notify('disconnected');
             if (!enabled) return;
@@ -137,6 +142,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             attempts = 0;
             manualDisconnect = false;
             cancelled = false;
+            gaveUp = false;
         },
 
         cancel,

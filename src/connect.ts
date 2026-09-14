@@ -201,9 +201,28 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         notifyStatus('connected');
     };
 
+    /**
+     * One reconnect attempt. gatt.connect() can succeed and a later step still
+     * fail, so a failed attempt closes the link rather than leaving it
+     * half-open — otherwise it outlives 'failed' and holds the sensor, which
+     * lets no other app or device connect to it.
+     *
+     * Closing the link fires gattserverdisconnected back at our own handler.
+     * The reconnection manager ignores it: mid-cycle as a duplicate, and after
+     * giving up because 'failed' is final.
+     */
+    const reconnectOnce = async (): Promise<void> => {
+        try {
+            await connect();
+        } catch (error) {
+            gatt.disconnect();
+            throw error;
+        }
+    };
+
     const handleGattDisconnect = (): void => {
         if (!reconnection.isManualDisconnect()) {
-            reconnection.handleDisconnect(connect);
+            reconnection.handleDisconnect(reconnectOnce);
         }
     };
     device.addEventListener('gattserverdisconnected', handleGattDisconnect);

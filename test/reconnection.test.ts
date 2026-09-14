@@ -173,6 +173,40 @@ describe('createReconnectionManager', () => {
         assert.equal(statuses.includes('failed'), false);
     });
 
+    it('ignores a drop reported after it has given up', async () => {
+        // 'failed' is final. Closing a half-open link can itself fire another
+        // disconnect event, and that must not start the announcements again.
+        const m = make({ maxAttempts: 1 });
+        await m.attemptReconnect(async () => {
+            throw new Error('still down');
+        });
+        assert.deepEqual(statuses, ['reconnecting', 'failed']);
+
+        let calls = 0;
+        m.handleDisconnect(async () => {
+            calls++;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        assert.equal(calls, 0);
+        assert.deepEqual(statuses, ['reconnecting', 'failed'], 'no second disconnected/failed');
+    });
+
+    it('reset() after giving up allows reconnection again', async () => {
+        const m = make({ maxAttempts: 1 });
+        await m.attemptReconnect(async () => {
+            throw new Error('still down');
+        });
+        m.reset();
+
+        let calls = 0;
+        m.handleDisconnect(async () => {
+            calls++;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(calls, 1);
+    });
+
     it('never reconnects when reconnection is disabled', async () => {
         const m = make(false);
         let calls = 0;

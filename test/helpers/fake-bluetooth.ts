@@ -65,16 +65,26 @@ export class FakeGattServer {
     public connected = false;
     public disconnectCalls = 0;
 
-    constructor(private readonly services: Map<string, FakeService>) {}
+    constructor(
+        private readonly services: Map<string, FakeService>,
+        private readonly onDisconnected: () => void
+    ) {}
 
     async connect(): Promise<FakeGattServer> {
         this.connected = true;
         return this;
     }
 
+    /**
+     * As in the Web Bluetooth spec, disconnecting a connected server fires
+     * gattserverdisconnected at the device — even when the page asked for it.
+     * Code that closes its own link has to expect its own handler to run.
+     */
     disconnect(): void {
-        this.connected = false;
         this.disconnectCalls++;
+        if (!this.connected) return;
+        this.connected = false;
+        this.onDisconnected();
     }
 
     async getPrimaryService(uuid: string): Promise<FakeService> {
@@ -93,7 +103,7 @@ export class FakeDevice {
         public readonly name: string | undefined,
         public readonly services: Map<string, FakeService>
     ) {
-        this.gatt = new FakeGattServer(services);
+        this.gatt = new FakeGattServer(services, () => this.fireDisconnected());
     }
 
     addEventListener(type: string, listener: Listener): void {
@@ -115,9 +125,13 @@ export class FakeDevice {
         return (this.listeners.get(type) ?? []).length;
     }
 
-    /** Simulate the browser firing gattserverdisconnected. */
+    /** Simulate the link dropping: the sensor went out of range, or powered off. */
     dropConnection(): void {
         this.gatt.connected = false;
+        this.fireDisconnected();
+    }
+
+    private fireDisconnected(): void {
         for (const listener of [...(this.listeners.get('gattserverdisconnected') ?? [])]) {
             listener({} as Event);
         }
