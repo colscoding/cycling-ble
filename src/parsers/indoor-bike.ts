@@ -60,8 +60,9 @@ export function parseIndoorBikeData(value: DataView): IndoorBikeParseResult {
     if (flags & FLAG_AVG_SPEED) offset += 2;
 
     if (flags & FLAG_INST_CADENCE) {
+        // Unsigned, so only the ceiling needs checking.
         const raw = Math.round(value.getUint16(offset, true) / CADENCE_RESOLUTION);
-        cadenceRpm = raw >= 0 && raw < MAX_CADENCE_RPM ? raw : null;
+        cadenceRpm = raw < MAX_CADENCE_RPM ? raw : null;
         offset += 2;
     }
 

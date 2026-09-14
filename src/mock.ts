@@ -38,7 +38,7 @@ function createMockSensor(
 
     const readingListeners = createListeners<SensorReading>();
     const statusListeners = createListeners<ConnectionStatus>();
-    let timer: ReturnType<typeof setInterval> | null = null;
+    let timer: ReturnType<typeof setInterval> | undefined;
     let disconnected = false;
 
     // Unlike a real connection, the caller triggers delivery here — usually a
@@ -58,23 +58,13 @@ function createMockSensor(
         throwFirst(readingListeners.emit(reading));
     };
 
-    const start = (): void => {
-        if (timer !== null || disconnected) return;
+    if (autoStart) {
         timer = setInterval(() => emit(generate()), intervalMs);
         // Node's setInterval returns a Timeout carrying unref(); the browser's
         // returns a bare numeric handle that has no such method. Unref where it
         // exists so a running mock never holds a Node process open.
         (timer as unknown as { unref?: () => void }).unref?.();
-    };
-
-    const stop = (): void => {
-        if (timer !== null) {
-            clearInterval(timer);
-            timer = null;
-        }
-    };
-
-    if (autoStart) start();
+    }
 
     return {
         deviceName,
@@ -86,7 +76,7 @@ function createMockSensor(
         },
         disconnect(): void {
             if (disconnected) return;
-            stop();
+            clearInterval(timer);
             disconnected = true;
             notifyStatus('disconnected');
         },
