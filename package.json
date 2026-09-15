@@ -1,6 +1,6 @@
 {
     "name": "cycling-ble",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Connect to cycling power, heart rate, cadence, and FTMS trainer sensors over Web Bluetooth",
     "type": "module",
     "license": "MIT",
