@@ -2,11 +2,14 @@
  * Cycling Speed and Cadence Service (0x1816) — CSC Measurement (0x2A5B).
  */
 
-/** Cadence above this is treated as a decoding artefact rather than a rider. */
-const MAX_CADENCE_RPM = 300;
+import { MAX_CADENCE_RPM } from './limits.js';
 
-/** Both the revolution counter and the event time are uint16 and wrap. */
-const UINT16_MAX = 65536;
+/**
+ * How many values a uint16 holds — one more than its maximum. Both the
+ * revolution counter and the event time are uint16 and wrap, and correcting a
+ * wrap means adding the range, not the maximum.
+ */
+const UINT16_RANGE = 65536;
 
 /** Crank event time is expressed in 1/1024 second units. */
 const CRANK_TIME_RESOLUTION = 1024;
@@ -22,12 +25,21 @@ const FLAG_CRANK_DATA = 0x02;
  * exists as a delta between two samples.
  */
 export interface CadenceState {
-    lastCrankRevs: number | null;
-    lastCrankTime: number | null;
+    readonly lastCrankRevs: number | null;
+    readonly lastCrankTime: number | null;
 }
 
-/** What to pass on the first call after connecting. */
-export const initialCadenceState: CadenceState = { lastCrankRevs: null, lastCrankTime: null };
+/**
+ * What to pass on the first call after connecting.
+ *
+ * Frozen, and readonly in the type. This is one object shared by every caller
+ * in the process, so a consumer writing to it would move the starting point
+ * for all the others. Each call returns fresh state rather than mutating.
+ */
+export const initialCadenceState: CadenceState = Object.freeze({
+    lastCrankRevs: null,
+    lastCrankTime: null,
+});
 
 export interface CadenceParseResult {
     /** Cadence in rpm, or null when a value cannot be derived from this sample. */
@@ -43,8 +55,11 @@ export interface CadenceParseResult {
  * value: the first sample after connecting, a packet without crank data, a
  * repeated event time, or an implausible result.
  *
- * A stopped crank repeats its last event, so pedalling stopping shows up as
- * readings stopping — never as a 0 rpm result.
+ * A stopped crank usually repeats its last event, which leaves no time delta
+ * to divide by, so pedalling stopping shows up as readings stopping. A sensor
+ * that instead advances the event time without a new revolution has timed a
+ * window the rider did not pedal through: that yields a genuine 0 rpm, and is
+ * reported as one.
  *
  * @throws {RangeError} When the packet is too short for the fields its flags
  * announce. That is a malformed packet, not an unusable sample.
@@ -71,8 +86,8 @@ export function parseCadenceMeasurement(value: DataView, state: CadenceState): C
 
     let revDelta = crankRevs - state.lastCrankRevs;
     let timeDelta = crankTime - state.lastCrankTime;
-    if (revDelta < 0) revDelta += UINT16_MAX;
-    if (timeDelta < 0) timeDelta += UINT16_MAX;
+    if (revDelta < 0) revDelta += UINT16_RANGE;
+    if (timeDelta < 0) timeDelta += UINT16_RANGE;
 
     if (timeDelta <= 0) {
         return { rpm: null, state: newState };

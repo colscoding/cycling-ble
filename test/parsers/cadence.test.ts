@@ -80,13 +80,32 @@ describe('parseCadenceMeasurement', () => {
         assert.equal(parseCadenceMeasurement(crankView(5, 1024), first.state).rpm, null);
     });
 
-    it('emits nothing, not zero, when the crank stops', () => {
-        // A stopped crank repeats its last event, so there is no delta to
-        // compute. Callers see readings stop rather than a 0 rpm reading —
-        // the README tells them to treat a stale cadence as zero.
+    it('emits nothing when the crank repeats its last event', () => {
+        // A sensor that keeps notifying without a new crank event repeats both
+        // fields, leaving no time delta to divide by. Callers see readings
+        // stop, which the README tells them to treat as zero.
         const first = parseCadenceMeasurement(crankView(40, 5000), initialCadenceState);
         const repeat = parseCadenceMeasurement(crankView(40, 5000), first.state);
         assert.equal(repeat.rpm, null);
+    });
+
+    it('reports 0 rpm when the event time advances with no new revolution', () => {
+        // Distinct from a repeated event: the sensor moved its event time on,
+        // so it timed a window the rider did not pedal through. That is a true
+        // zero and is reported as one, rather than being withheld.
+        const first = parseCadenceMeasurement(crankView(40, 5000), initialCadenceState);
+        const second = parseCadenceMeasurement(crankView(40, 6024), first.state);
+        assert.equal(second.rpm, 0);
+    });
+
+    it('exposes an initial state one consumer cannot corrupt for every other', () => {
+        // The README tells callers to start from this shared object. Nothing
+        // in the package mutates it, but a consumer that wrote to it would
+        // move the starting point for every other consumer in the process.
+        assert.throws(() => {
+            (initialCadenceState as { lastCrankRevs: number | null }).lastCrankRevs = 999;
+        }, TypeError);
+        assert.deepEqual(initialCadenceState, { lastCrankRevs: null, lastCrankTime: null });
     });
 
     it('does not mutate the state it was given', () => {

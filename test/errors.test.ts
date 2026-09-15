@@ -136,6 +136,29 @@ describe('classifyBluetoothError', () => {
         assert.equal(info.kind, 'not-found');
     });
 
+    it('recognises a browser without getDevices() as unavailable and not retryable', () => {
+        // The message connectPower throws when previousDeviceId is given but
+        // the browser cannot look devices up. Retrying is pointless — the
+        // browser will not grow the method — so the caller must fall back to
+        // a chooser rather than try the same call again.
+        const info = classifyBluetoothError(
+            new Error(
+                'Cannot reconnect to saved device abc without a chooser: ' +
+                    'this browser does not support getDevices()'
+            )
+        );
+        assert.equal(info.kind, 'unavailable');
+        assert.equal(info.canRetry, false);
+    });
+
+    it('keeps a saved-device lookup that failed retryable', () => {
+        // The third saved-device case, and the reason the branch above cannot
+        // simply match on "saved device": a lookup that threw may well succeed
+        // next time, so this one stays retryable.
+        const info = classifyBluetoothError(new Error('Could not look up saved device abc'));
+        assert.equal(info.canRetry, true);
+    });
+
     it('reads name and message from an error-like object that is not an Error', () => {
         // Errors crossing a realm, a worker, or a serialisation boundary lose
         // their prototype but keep their fields.

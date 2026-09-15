@@ -87,6 +87,10 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         text.includes('bluetooth adapter not available') ||
         text.includes('web bluetooth api is not available') ||
         text.includes('web bluetooth is not available') ||
+        // Thrown by the connect functions when previousDeviceId is given and
+        // the browser cannot look devices up. Retrying the same call cannot
+        // help, which is what separates this from a lookup that failed.
+        text.includes('does not support getdevices') ||
         (name === 'NotFoundError' && text.includes('bluetooth'))
     ) {
         return {

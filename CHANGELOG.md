@@ -29,6 +29,22 @@ All notable changes to this package are recorded here. The format follows
   support `getDevices()`, or the lookup failed. A failed lookup carries the
   original error as `cause`. All three used to say the device was not found
   in the permitted device list.
+- `classifyBluetoothError` reports a browser with no `getDevices()` as
+  `unavailable` with `canRetry: false`. It used to fall through to `unknown`
+  with `canRetry: true`, advising a retry that cannot ever succeed. A
+  saved-device lookup that merely failed stays retryable.
+- `initialCadenceState` is frozen. It is a single object shared by every
+  caller, so a consumer writing to it used to move the starting point for
+  every other consumer in the process.
+- Cadence documentation no longer claims a `0 rpm` reading is impossible. A
+  sensor that advances its crank event time without reporting a new
+  revolution yields a real `0`, and always did.
+
+### Changed
+
+- `CadenceState`'s fields are `readonly`. The parser never mutated the state it
+  was handed, and callers thread the returned state through instead; code that
+  wrote to a `CadenceState` in place will now fail to compile.
 
 ### Added
 

@@ -76,10 +76,15 @@ Connects to a Cycling Speed and Cadence Service (`0x1816`) sensor. Yields
 `cadence`. CSC reports cumulative crank counters, so the first notification
 after connecting produces no reading — RPM only exists as a delta.
 
-For the same reason, **a stopped crank produces no reading rather than a
-`0 rpm` one**: the sensor repeats its last crank event, and there is no delta
-to compute. If your UI shows cadence, treat a value that has not been updated
-for a few seconds as zero.
+When pedalling stops, most sensors repeat their last crank event. That leaves
+no delta to compute, so **readings stop rather than arriving as `0 rpm`**. If
+your UI shows cadence, treat a value that has not been updated for a few
+seconds as zero.
+
+A sensor that instead advances its event time without reporting a new
+revolution has timed a window the rider did not pedal through, and that does
+yield a real `0`. Handle both: a `0` reading and a reading that stops arriving
+mean the same thing.
 
 ### `ConnectOptions`
 
@@ -185,8 +190,9 @@ rejection says which case it hit:
 
 - the device is no longer permitted — `classifyBluetoothError` reports
   `not-found`;
-- the browser does not support `getDevices()` at all, so there is no point
-  saving device ids;
+- the browser does not support `getDevices()` at all — `classifyBluetoothError`
+  reports `unavailable` with `canRetry: false`, because retrying cannot help
+  and there is no point saving device ids;
 - the lookup itself failed — the original error is the rejection's `cause`.
 
 The chooser still needs a user gesture. A saved device that is switched off or
@@ -233,7 +239,8 @@ import { parseIndoorBikeData, parseCadenceMeasurement, initialCadenceState } fro
 const { powerW, cadenceRpm } = parseIndoorBikeData(dataView);
 
 // parseCadenceMeasurement is the one stateful parser: thread its `state`
-// through successive calls, starting from initialCadenceState.
+// through successive calls, starting from initialCadenceState. That starting
+// object is frozen and shared, so reassign your variable — never write to it.
 let state = initialCadenceState;
 const result = parseCadenceMeasurement(dataView, state);
 state = result.state;

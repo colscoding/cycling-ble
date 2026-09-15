@@ -7,8 +7,7 @@
  * control.
  */
 
-/** Cadence above this is treated as a decoding artefact rather than a rider. */
-const MAX_CADENCE_RPM = 300;
+import { MAX_CADENCE_RPM } from './limits.js';
 
 /**
  * Bit 0 is "More Data" and is the one inverted flag in the field: when it is
