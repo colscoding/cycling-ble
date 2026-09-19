@@ -56,11 +56,11 @@ export interface Logger {
 
 /** Automatic reconnection tuning. */
 export interface ReconnectOptions {
-    /** Attempts before giving up and reporting `failed`. Default 5. */
+    /** Nonnegative safe integer or Infinity. Attempts before `failed`; default 5. */
     maxAttempts?: number;
-    /** First backoff delay in ms; doubles each attempt. Default 1000. */
+    /** Integer ms in [0, 2147483647]; doubles each attempt. Default 1000. */
     baseDelayMs?: number;
-    /** Upper bound on the backoff delay in ms. Default 10000. */
+    /** Integer ms in [0, 2147483647]. Caps each backoff; default 10000. */
     maxDelayMs?: number;
 }
 

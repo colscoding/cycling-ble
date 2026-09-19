@@ -26,6 +26,76 @@ describe('createReconnectionManager', () => {
         return manager;
     }
 
+    for (const [option, invalidValues] of [
+        ['maxAttempts', [NaN, -1, -Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1]],
+        ['baseDelayMs', [NaN, -1, Infinity, -Infinity, 1.5, 2 ** 31]],
+        ['maxDelayMs', [NaN, -1, Infinity, -Infinity, 1.5, 2 ** 31]],
+    ] as const) {
+        it(`rejects invalid ${option} values`, () => {
+            for (const value of invalidValues) {
+                assert.throws(() => createReconnectionManager({ sensorName: 'Test', options: { [option]: value } }), {
+                    name: 'RangeError',
+                    message: new RegExp(option),
+                });
+            }
+        });
+    }
+
+    it('accepts zero attempts and fails without calling the transport', async () => {
+        const m = make({ maxAttempts: 0 });
+        let calls = 0;
+        await m.attemptReconnect(async () => {
+            calls++;
+        });
+        assert.equal(calls, 0);
+        assert.deepEqual(statuses, ['failed']);
+    });
+
+    it('accepts the largest supported attempt count and timer delays', async () => {
+        const { logger, calls } = recordingLogger();
+        manager = createReconnectionManager({
+            sensorName: 'Test',
+            options: { maxAttempts: Number.MAX_SAFE_INTEGER, baseDelayMs: 2147483647, maxDelayMs: 2147483647 },
+            logger,
+        });
+        const pending = manager.attemptReconnect(async () => {});
+        manager.cancel();
+        await pending;
+        assert.match(calls.info[0]!, /in 2147483647ms/);
+    });
+
+    it('keeps unlimited zero-delay retries finite and cancellable beyond exponent overflow', async (t) => {
+        t.mock.timers.enable({ apis: ['setTimeout'] });
+        const { logger, calls } = recordingLogger();
+        manager = createReconnectionManager({
+            sensorName: 'Test',
+            options: { maxAttempts: Infinity, baseDelayMs: 0, maxDelayMs: 0 },
+            logger,
+            onStatusChange: (status) => statuses.push(status),
+        });
+        let attempts = 0;
+        const pending = manager.attemptReconnect(async () => {
+            attempts++;
+            throw new Error('offline');
+        });
+        try {
+            for (let i = 0; i < 1030; i++) {
+                t.mock.timers.tick(0);
+                await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+            manager.cancel();
+            await pending;
+            assert.equal(attempts, 1030);
+            assert.equal(statuses.includes('failed'), false);
+            assert.ok(
+                calls.info.filter((message) => message.includes('attempt')).every((message) => /in 0ms$/.test(message))
+            );
+        } finally {
+            manager.cancel();
+            t.mock.timers.reset();
+        }
+    });
+
     it('reconnects and reports connected via the caller-supplied connect fn', async () => {
         const m = make();
         let calls = 0;

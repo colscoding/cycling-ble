@@ -3,6 +3,7 @@
  */
 
 import { MAX_CADENCE_RPM } from './limits.js';
+import { requireLength } from './length.js';
 
 /**
  * How many values a uint16 holds — one more than its maximum. Both the
@@ -66,6 +67,8 @@ export interface CadenceParseResult {
  */
 export function parseCadenceMeasurement(value: DataView, state: CadenceState): CadenceParseResult {
     const flags = value.getUint8(0);
+    const offset = flags & FLAG_WHEEL_DATA ? 7 : 1;
+    requireLength(value, offset + (flags & FLAG_CRANK_DATA ? 4 : 0));
 
     if (!(flags & FLAG_CRANK_DATA)) {
         return { rpm: null, state };
@@ -73,8 +76,6 @@ export function parseCadenceMeasurement(value: DataView, state: CadenceState): C
 
     // Wheel data, when present, occupies 6 bytes between the flags and the
     // crank fields: a uint32 revolution count and a uint16 event time.
-    const offset = flags & FLAG_WHEEL_DATA ? 7 : 1;
-
     const crankRevs = value.getUint16(offset, true);
     const crankTime = value.getUint16(offset + 2, true);
 

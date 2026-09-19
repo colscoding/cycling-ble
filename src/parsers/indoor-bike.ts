@@ -8,6 +8,7 @@
  */
 
 import { MAX_CADENCE_RPM } from './limits.js';
+import { requireLength } from './length.js';
 
 /**
  * Bit 0 is "More Data" and is the one inverted flag in the field: when it is
@@ -26,6 +27,12 @@ const FLAG_TOTAL_DISTANCE = 1 << 4;
  */
 const FLAG_RESISTANCE = 1 << 5;
 const FLAG_INST_POWER = 1 << 6;
+const FLAG_AVG_POWER = 1 << 7;
+const FLAG_ENERGY = 1 << 8;
+const FLAG_HEART_RATE = 1 << 9;
+const FLAG_METABOLIC_EQUIVALENT = 1 << 10;
+const FLAG_ELAPSED_TIME = 1 << 11;
+const FLAG_REMAINING_TIME = 1 << 12;
 
 /** Instantaneous cadence is a uint16 carrying 0.5 rpm per unit. */
 const CADENCE_RESOLUTION = 2;
@@ -71,7 +78,16 @@ export function parseIndoorBikeData(value: DataView): IndoorBikeParseResult {
 
     if (flags & FLAG_INST_POWER) {
         powerW = value.getInt16(offset, true);
+        offset += 2;
     }
+
+    if (flags & FLAG_AVG_POWER) offset += 2;
+    if (flags & FLAG_ENERGY) offset += 5; // total (uint16), per hour (uint16), per minute (uint8)
+    if (flags & FLAG_HEART_RATE) offset += 1;
+    if (flags & FLAG_METABOLIC_EQUIVALENT) offset += 1;
+    if (flags & FLAG_ELAPSED_TIME) offset += 2;
+    if (flags & FLAG_REMAINING_TIME) offset += 2;
+    requireLength(value, offset);
 
     return { powerW, cadenceRpm };
 }

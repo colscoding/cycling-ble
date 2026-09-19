@@ -8,6 +8,7 @@ import type {
     StatusListener,
 } from './types.js';
 import { createListeners, reportError } from './listeners.js';
+import { isMissingGattAttribute } from './errors.js';
 import { noopLogger } from './logger.js';
 import { createReconnectionManager } from './reconnection.js';
 import {
@@ -18,6 +19,10 @@ import {
     parsePowerMeasurement,
     type CadenceState,
 } from './parsers/index.js';
+
+// A late completion from an abandoned connection must not close a newer
+// connection using the same device's GATT server.
+const latestGattAttempts = new WeakMap<BluetoothRemoteGATTServer, symbol>();
 
 /** Metrics decoded from one notification, before a timestamp is attached. */
 type ReadingFields = Omit<SensorReading, 'timestamp'>;
@@ -91,6 +96,43 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         );
     }
 
+    const readingListeners = createListeners<SensorReading>();
+    const statusListeners = createListeners<ConnectionStatus>();
+
+    let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+    let parseValue: ValueParser = () => null;
+
+    // Neither a notification nor a reconnect has a caller to hand a listener's
+    // error back to. Reporting it instead of throwing also keeps the caller's
+    // bugs out of the reconnection logic: a throw from a 'connected' listener
+    // used to register as a failed attempt, and retried forever.
+    const pendingStatuses: ConnectionStatus[] = [];
+    let notifyingStatus = false;
+    const notifyStatus = (status: ConnectionStatus): void => {
+        // A listener can disconnect during delivery. Finish the current event
+        // for every subscriber before delivering that nested transition, so
+        // nobody sees 'connected' after the resulting 'disconnected'.
+        pendingStatuses.push(status);
+        if (notifyingStatus) return;
+
+        notifyingStatus = true;
+        try {
+            let next: ConnectionStatus | undefined;
+            while ((next = pendingStatuses.shift()) !== undefined) {
+                statusListeners.emit(next).forEach(reportError);
+            }
+        } finally {
+            notifyingStatus = false;
+        }
+    };
+
+    const reconnection = createReconnectionManager({
+        sensorName: config.sensorName,
+        ...(reconnect === undefined ? {} : { options: reconnect }),
+        logger,
+        onStatusChange: notifyStatus,
+    });
+
     const serviceUuids = config.candidates.map((c) => c.serviceUuid);
 
     const device = previousDeviceId
@@ -106,27 +148,6 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     }
 
     const deviceName = device.name || config.defaultDeviceName;
-    const readingListeners = createListeners<SensorReading>();
-    const statusListeners = createListeners<ConnectionStatus>();
-
-    let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
-    let parseValue: ValueParser = () => null;
-
-    // Neither a notification nor a reconnect has a caller to hand a listener's
-    // error back to. Reporting it instead of throwing also keeps the caller's
-    // bugs out of the reconnection logic: a throw from a 'connected' listener
-    // used to register as a failed attempt, and retried forever.
-    const notifyStatus = (status: ConnectionStatus): void => {
-        statusListeners.emit(status).forEach(reportError);
-    };
-
-    const reconnection = createReconnectionManager({
-        sensorName: config.sensorName,
-        ...(reconnect === undefined ? {} : { options: reconnect }),
-        logger,
-        onStatusChange: notifyStatus,
-    });
-
     const handleValueChanged = (event: Event): void => {
         const target = event.target as BluetoothRemoteGATTCharacteristic;
         const value = target.value;
@@ -145,98 +166,95 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         readingListeners.emit(reading).forEach(reportError);
     };
 
-    /**
-     * True when the caller disconnected while we were awaiting something. Every
-     * step below spans an await, and a reconnect can be several seconds long,
-     * so `disconnect()` can land at any point in here.
-     */
-    const abandoned = (): boolean => reconnection.isManualDisconnect();
-
     const connect = async (): Promise<void> => {
-        const server = await gatt.connect();
+        const attempt = Symbol();
+        latestGattAttempts.set(gatt, attempt);
+        const closeAttempt = (): void => {
+            if (latestGattAttempts.get(gatt) === attempt) gatt.disconnect();
+        };
+        const abandoned = (): boolean => {
+            if (!reconnection.isManualDisconnect()) return false;
+            closeAttempt();
+            return true;
+        };
 
-        let selected: { characteristic: BluetoothRemoteGATTCharacteristic; createParser: () => ValueParser } | null =
-            null;
-        let lastCandidateError: unknown;
-        for (const candidate of config.candidates) {
-            try {
-                const service = await server.getPrimaryService(candidate.serviceUuid);
-                const char = await service.getCharacteristic(candidate.characteristicUuid);
-                selected = { characteristic: char, createParser: candidate.createParser };
-                break;
-            } catch (error) {
-                // Usually means the service is simply absent, but a GATT
-                // failure looks identical here. Keep the last one so the
-                // thrown error carries the real reason.
-                lastCandidateError = error;
-            }
-        }
-
-        if (!selected) {
-            throw new Error(`${config.sensorName} exposes none of the expected BLE services`, {
-                cause: lastCandidateError,
-            });
-        }
-
-        await selected.characteristic.startNotifications();
-        if (abandoned()) {
-            gatt.disconnect();
-            return;
-        }
-
-        // Everything below mutates connection state, and is deliberately after
-        // the last await: a failure or an abandonment part-way through would
-        // otherwise leave a half-wired connection behind.
-
-        // Drop the previous connection's listener before rebinding. A browser
-        // may hand back the same characteristic object on reconnect, and
-        // subscribing twice delivers every notification twice — which silently
-        // doubles the recorded sample rate rather than failing visibly.
-        characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
-
-        characteristic = selected.characteristic;
-        parseValue = selected.createParser();
-        characteristic.addEventListener('characteristicvaluechanged', handleValueChanged);
-
-        reconnection.reset();
-        notifyStatus('connected');
-    };
-
-    /**
-     * One reconnect attempt. gatt.connect() can succeed and a later step still
-     * fail, so a failed attempt closes the link rather than leaving it
-     * half-open — otherwise it outlives 'failed' and holds the sensor, which
-     * lets no other app or device connect to it.
-     *
-     * Closing the link fires gattserverdisconnected back at our own handler.
-     * The reconnection manager ignores it: mid-cycle as a duplicate, and after
-     * giving up because 'failed' is final.
-     */
-    const reconnectOnce = async (): Promise<void> => {
         try {
-            await connect();
+            const server = await gatt.connect();
+            if (abandoned()) return;
+
+            let selected: {
+                characteristic: BluetoothRemoteGATTCharacteristic;
+                createParser: () => ValueParser;
+            } | null = null;
+            let lastCandidateError: unknown;
+            for (const candidate of config.candidates) {
+                try {
+                    const service = await server.getPrimaryService(candidate.serviceUuid);
+                    if (abandoned()) return;
+                    const char = await service.getCharacteristic(candidate.characteristicUuid);
+                    if (abandoned()) return;
+                    selected = { characteristic: char, createParser: candidate.createParser };
+                    break;
+                } catch (error) {
+                    if (abandoned()) return;
+                    // Only absence permits fallback. Preserve permission and
+                    // transport failures so callers can diagnose the real problem.
+                    if (!isMissingGattAttribute(error)) throw error;
+                    lastCandidateError = error;
+                }
+            }
+
+            if (!selected) {
+                throw new Error(`${config.sensorName} exposes none of the expected BLE services`, {
+                    cause: lastCandidateError,
+                });
+            }
+
+            await selected.characteristic.startNotifications();
+            if (abandoned()) return;
+            if (!gatt.connected) throw new Error('GATT server disconnected during setup');
+
+            // Everything below mutates connection state, and is deliberately after
+            // the last await: a failure or an abandonment part-way through would
+            // otherwise leave a half-wired connection behind.
+
+            // Drop the previous connection's listener before rebinding. A browser
+            // may hand back the same characteristic object on reconnect, and
+            // subscribing twice delivers every notification twice — which silently
+            // doubles the recorded sample rate rather than failing visibly.
+            characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
+
+            characteristic = selected.characteristic;
+            parseValue = selected.createParser();
+            characteristic.addEventListener('characteristicvaluechanged', handleValueChanged);
+
+            reconnection.reset();
+            notifyStatus('connected');
         } catch (error) {
-            gatt.disconnect();
+            // Setup can fail after opening the link. Only close our own attempt;
+            // an older, abandoned operation must not disconnect its replacement.
+            closeAttempt();
             throw error;
         }
     };
 
+    let initialized = false;
     const handleGattDisconnect = (): void => {
-        if (!reconnection.isManualDisconnect()) {
-            reconnection.handleDisconnect(reconnectOnce);
+        if (initialized && !reconnection.isManualDisconnect()) {
+            reconnection.handleDisconnect(connect);
         }
     };
     device.addEventListener('gattserverdisconnected', handleGattDisconnect);
 
     try {
         await connect();
+        initialized = true;
     } catch (error) {
         // The caller never receives a connection here, so nothing else can ever
         // clean this up. Left in place, the device listener would start a
         // reconnect loop on the next drop that no one holds a handle to.
         device.removeEventListener('gattserverdisconnected', handleGattDisconnect);
         reconnection.markManualDisconnect();
-        gatt.disconnect();
         throw error;
     }
 

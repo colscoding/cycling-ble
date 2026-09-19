@@ -9,6 +9,19 @@ function named(name: string, message: string): Error {
 }
 
 describe('classifyBluetoothError', () => {
+    for (const [name, message, kind] of [
+        ['SecurityError', 'GATT permission denied', 'permission-denied'],
+        ['NetworkError', 'GATT connection timed out', 'timeout'],
+        ['NotFoundError', 'Service not found', 'incompatible'],
+        ['NotFoundError', 'Characteristic not found', 'incompatible'],
+        ['NotFoundError', 'No Services matching UUID 0x180D in Bluetooth device', 'incompatible'],
+        ['NotFoundError', 'No Characteristics matching UUID 0x2A37', 'incompatible'],
+    ]) {
+        it(`prioritizes specific errors: ${message}`, () => {
+            assert.equal(classifyBluetoothError(named(name!, message!)).kind, kind);
+        });
+    }
+
     it('recognises a cancelled chooser', () => {
         const info = classifyBluetoothError(new Error('User cancelled the requestDevice() chooser.'));
         assert.equal(info.kind, 'cancelled');

@@ -4,6 +4,8 @@ import { noopLogger } from './logger.js';
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_BASE_DELAY_MS = 1000;
 const DEFAULT_MAX_DELAY_MS = 10_000;
+// Longer delays overflow the timer range in browsers and Node.
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
 export interface ReconnectionManager {
     /** Run one backoff cycle, retrying until success or exhaustion. */
@@ -43,6 +45,18 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
     const baseDelayMs = tuning.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
     const maxDelayMs = tuning.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
 
+    if (maxAttempts !== Infinity && (!Number.isSafeInteger(maxAttempts) || maxAttempts < 0)) {
+        throw new RangeError('maxAttempts must be a nonnegative safe integer or Infinity');
+    }
+    for (const [name, delay] of [
+        ['baseDelayMs', baseDelayMs],
+        ['maxDelayMs', maxDelayMs],
+    ] as const) {
+        if (!Number.isInteger(delay) || delay < 0 || delay > MAX_TIMER_DELAY_MS) {
+            throw new RangeError(`${name} must be an integer between 0 and ${MAX_TIMER_DELAY_MS}`);
+        }
+    }
+
     let attempts = 0;
     let reconnecting = false;
     let manualDisconnect = false;
@@ -79,7 +93,9 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             }
 
             attempts++;
-            const delay = Math.min(baseDelayMs * 2 ** (attempts - 1), maxDelayMs);
+            // With integer delays, 31 doublings already reach any allowed cap.
+            // Bound the exponent so unlimited retries never compute 0 * Infinity.
+            const delay = Math.min(baseDelayMs * 2 ** Math.min(attempts - 1, 31), maxDelayMs);
             logger.info(`[${sensorName}] reconnection attempt ${attempts}/${maxAttempts} in ${delay}ms`);
             notify('reconnecting');
 

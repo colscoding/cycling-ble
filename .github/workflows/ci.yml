@@ -19,3 +19,9 @@ jobs:
                   cache: pnpm
             - run: pnpm install --frozen-lockfile
             - run: pnpm run check
+            # The development toolchain needs Node 22; the published package
+            # promises Node 20.0.0 and is checked separately at that boundary.
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 20.0.0
+            - run: node --test scripts/check-package.mjs

@@ -6,6 +6,31 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Status listeners receive nested lifecycle transitions in order. If a listener
+  disconnects during `connected` or `reconnecting`, every subscriber now
+  receives the resulting `disconnected` last, including when that listener
+  subsequently throws.
+- Service discovery preserves permission and transport failures instead of
+  reporting an incompatible sensor. Error classification prioritizes specific
+  permission, timeout, and missing-attribute errors over generic GATT wording.
+- All parsers reject truncated declared fields, including optional fields that
+  are not exposed as readings and incomplete heart-rate RR intervals.
+- Cancelling reconnect setup stops further GATT operations after each awaited
+  step. Late completions cannot close a newer connection to the same device,
+  and initial setup cannot start an overlapping automatic reconnect.
+- Invalid reconnection options reject with `RangeError` before device selection
+  or lookup. Unlimited retries keep backoff arithmetic finite.
+- Published packages include the TypeScript sources referenced by JavaScript
+  and declaration source maps.
+
+### Added
+
+- A packed-package check validates public imports, declarations without ambient
+  Bluetooth types, and source-map targets in an isolated consumer. CI also runs
+  it on the minimum supported runtime, Node 20.0.0.
+
 ## [0.1.1] - 2026-09-15
 
 ### Fixed

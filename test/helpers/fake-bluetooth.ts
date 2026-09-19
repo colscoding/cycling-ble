@@ -56,7 +56,7 @@ export class FakeService {
 
     async getCharacteristic(uuid: string): Promise<FakeCharacteristic> {
         const found = this.characteristics.get(uuid);
-        if (!found) throw new Error(`Characteristic ${uuid} not found`);
+        if (!found) throw new DOMException(`Characteristic ${uuid} not found`, 'NotFoundError');
         return found;
     }
 }
@@ -89,7 +89,7 @@ export class FakeGattServer {
 
     async getPrimaryService(uuid: string): Promise<FakeService> {
         const found = this.services.get(uuid);
-        if (!found) throw new Error(`Service ${uuid} not found`);
+        if (!found) throw new DOMException(`Service ${uuid} not found`, 'NotFoundError');
         return found;
     }
 }

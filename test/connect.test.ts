@@ -241,9 +241,7 @@ describe('connectPower', () => {
         await assert.rejects(() => connectPower({ bluetooth: fake.bluetooth }), /none of the expected BLE services/);
     });
 
-    it('carries the underlying failure as the error cause', async () => {
-        // A GATT failure looks the same as an absent service from inside the
-        // candidate loop, so the real reason has to travel with the error.
+    it('preserves an unexpected discovery failure unchanged', async () => {
         const char = new FakeCharacteristic(CYCLING_POWER_MEASUREMENT);
         const fake = createFakeBluetooth({ services: { [CYCLING_POWER]: { [CYCLING_POWER_MEASUREMENT]: char } } });
         const gatt = fake.device.gatt;
@@ -255,8 +253,7 @@ describe('connectPower', () => {
         await assert.rejects(
             () => connectPower({ bluetooth: fake.bluetooth }),
             (error: Error) => {
-                assert.match(error.message, /none of the expected BLE services/);
-                assert.equal(error.cause, boom, 'the real failure is not lost');
+                assert.equal(error, boom, 'the real failure is not replaced by incompatibility');
                 return true;
             }
         );
@@ -479,6 +476,96 @@ describe('every connect function', () => {
 });
 
 describe('connection setup edge cases', () => {
+    for (const previousDeviceId of [undefined, 'saved-device']) {
+        it(`rejects invalid retry options before ${previousDeviceId ? 'saved-device lookup' : 'the chooser'}`, async () => {
+            const fake = powerMeterSetup();
+            let lookups = 0;
+            const bluetooth: BluetoothAdapter = {
+                requestDevice: fake.bluetooth.requestDevice,
+                getDevices: async () => {
+                    lookups++;
+                    return [fake.device];
+                },
+            };
+            for (const reconnect of [{ maxAttempts: NaN }, { baseDelayMs: Infinity }, { maxDelayMs: -1 }]) {
+                await assert.rejects(
+                    () =>
+                        connectPower({
+                            bluetooth,
+                            ...(previousDeviceId === undefined ? {} : { previousDeviceId }),
+                            reconnect,
+                        }),
+                    RangeError
+                );
+            }
+            assert.equal(fake.requestDeviceCalls.length, 0);
+            assert.equal(lookups, 0);
+            assert.equal(fake.device.gatt.connected, false);
+        });
+    }
+
+    for (const stage of ['service', 'characteristic'] as const) {
+        for (const [name, kind] of [
+            ['SecurityError', 'permission-denied'],
+            ['NetworkError', 'timeout'],
+        ] as const) {
+            it(`preserves ${name} during ${stage} discovery without trying FTMS`, async () => {
+                const fake = powerMeterSetup();
+                const failure = new DOMException('GATT operation failed', name);
+                const gatt = fake.device.gatt;
+                const getService = gatt.getPrimaryService.bind(gatt);
+                const probed: string[] = [];
+                gatt.getPrimaryService = async (uuid) => {
+                    probed.push(uuid);
+                    if (stage === 'service') throw failure;
+                    const service = await getService(uuid);
+                    service.getCharacteristic = async () => {
+                        throw failure;
+                    };
+                    return service;
+                };
+                await assert.rejects(
+                    () => connectPower({ bluetooth: fake.bluetooth }),
+                    (error) => {
+                        assert.equal(error, failure);
+                        assert.equal(classifyBluetoothError(error).kind, kind);
+                        return true;
+                    }
+                );
+                assert.deepEqual(probed, [CYCLING_POWER]);
+                assert.equal(gatt.connected, false);
+                assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
+            });
+        }
+    }
+
+    it('falls back when the preferred service lacks its measurement characteristic', async () => {
+        const fake = createFakeBluetooth({
+            services: {
+                [CYCLING_POWER]: {},
+                [FITNESS_MACHINE]: { [INDOOR_BIKE_DATA]: new FakeCharacteristic(INDOOR_BIKE_DATA) },
+            },
+        });
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+        try {
+            assert.equal(fake.characteristic(FITNESS_MACHINE, INDOOR_BIKE_DATA).notificationsStarted, true);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('retains the absent-service cause when no candidates match', async () => {
+        const fake = createFakeBluetooth({ services: {} });
+        await assert.rejects(
+            () => connectPower({ bluetooth: fake.bluetooth }),
+            (error: Error) => {
+                assert.equal((error.cause as DOMException).name, 'NotFoundError');
+                assert.equal(classifyBluetoothError(error).kind, 'incompatible');
+                return true;
+            }
+        );
+    });
+
     it('propagates a cancelled chooser unchanged and attaches nothing', async () => {
         const cancelled = new Error('User cancelled the requestDevice() chooser.');
         cancelled.name = 'NotFoundError';
@@ -556,6 +643,30 @@ describe('connection setup edge cases', () => {
 });
 
 describe('notifications', () => {
+    for (const [name, connect, service, characteristic, malformed] of [
+        ['power', connectPower, CYCLING_POWER, CYCLING_POWER_MEASUREMENT, [0x20, 0, 250, 0]],
+        ['FTMS', connectPower, FITNESS_MACHINE, INDOOR_BIKE_DATA, [0xc1, 0, 200, 0]],
+        ['heart rate', connectHeartRate, HEART_RATE, HEART_RATE_MEASUREMENT, [8, 72]],
+        ['cadence', connectCadence, 'cycling_speed_and_cadence', 'csc_measurement', [1]],
+    ] as const) {
+        it(`warns and drops ${name} packets with truncated unused fields`, async () => {
+            const char = new FakeCharacteristic(characteristic);
+            const fake = createFakeBluetooth({ services: { [service]: { [characteristic]: char } } });
+            const { logger, calls } = recordingLogger();
+            const conn = await connect({ bluetooth: fake.bluetooth, logger });
+            try {
+                const readings: SensorReading[] = [];
+                conn.addListener((reading) => readings.push(reading));
+                char.emit(new DataView(Uint8Array.from(malformed).buffer));
+                assert.deepEqual(readings, []);
+                assert.equal(calls.warn.length, 1);
+                assert.match(calls.warn[0]!, /Malformed BLE packet/);
+            } finally {
+                conn.disconnect();
+            }
+        });
+    }
+
     it('ignores a notification that carries no value', async () => {
         const fake = powerMeterSetup();
         const conn = await connectPower({ bluetooth: fake.bluetooth });
@@ -635,6 +746,47 @@ describe('connection lifecycle', () => {
         assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'connected']);
         conn.disconnect();
     });
+
+    for (const disconnectOn of ['connected', 'reconnecting'] as const) {
+        for (const throws of [false, true]) {
+            it(`keeps statuses ordered when a listener disconnects on ${disconnectOn}${throws ? ' and throws' : ''}`, async () => {
+                const reported = captureReportedErrors();
+                const fake = powerMeterSetup();
+                const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2 } });
+                const first: ConnectionStatus[] = [];
+                const second: ConnectionStatus[] = [];
+                const boom = new Error('ui bug after disconnect');
+                const expected: ConnectionStatus[] =
+                    disconnectOn === 'connected'
+                        ? ['disconnected', 'reconnecting', 'connected', 'disconnected']
+                        : ['disconnected', 'reconnecting', 'disconnected'];
+
+                try {
+                    conn.onStatusChange((status) => {
+                        first.push(status);
+                        if (status === disconnectOn) {
+                            conn.disconnect();
+                            if (throws) throw boom;
+                        }
+                    });
+                    conn.onStatusChange((status) => second.push(status));
+
+                    fake.device.dropConnection();
+                    await waitFor(() => second.length === expected.length, 1000, 'all status events');
+
+                    assert.deepEqual(first, expected, 'the initiating listener receives transitions in order');
+                    assert.deepEqual(second, expected, 'later listeners finish with the same disconnected status');
+                    assert.equal(fake.device.gatt.connected, false);
+                    assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
+                    assert.equal(fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).listenerCount, 0);
+                    assert.deepEqual(reported.errors, throws ? [boom] : []);
+                } finally {
+                    conn.disconnect();
+                    reported.restore();
+                }
+            });
+        }
+    }
 
     it('reports failed once reconnection gives up', async () => {
         const fake = powerMeterSetup();

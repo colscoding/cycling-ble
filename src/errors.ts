@@ -50,7 +50,7 @@ export interface ClassifyOptions {
  * Browsers disagree on both the `name` and the wording of these errors, so
  * classification is message-sniffing by necessity. The branch order matters:
  * a `NotFoundError` means a cancelled chooser when its message mentions
- * cancellation, and nothing-found otherwise.
+ * cancellation; service discovery errors need different advice from chooser errors.
  *
  * @example
  * try {
@@ -79,6 +79,61 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
             title: 'Connection cancelled',
             message: `${label} pairing was cancelled.`,
             suggestions: [],
+            canRetry: true,
+        };
+    }
+
+    if (text.includes('securityerror') || text.includes('permission') || name === 'SecurityError') {
+        return {
+            kind: 'permission-denied',
+            title: 'Permission denied',
+            message: 'Bluetooth permission was denied.',
+            suggestions: [
+                'Allow Bluetooth access in the browser settings',
+                'Choose "Allow" when prompted',
+                'Reload the page and try again',
+                'Make sure the page is served over HTTPS or localhost',
+            ],
+            canRetry: true,
+        };
+    }
+
+    if (
+        text.includes('networkerror') ||
+        text.includes('timeout') ||
+        text.includes('timed out') ||
+        name === 'NetworkError'
+    ) {
+        return {
+            kind: 'timeout',
+            title: 'Connection timed out',
+            message: `The connection to the ${label} timed out.`,
+            suggestions: [
+                'Make sure the sensor is in range and powered on',
+                'Move closer to the sensor',
+                'Power cycle the sensor and try again',
+                'Check for interference from other wireless devices',
+            ],
+            canRetry: true,
+        };
+    }
+
+    if (
+        ((text.includes('service') || text.includes('characteristic')) && text.includes('not found')) ||
+        text.includes('no services matching uuid') ||
+        text.includes('no characteristics matching uuid') ||
+        text.includes('none of the expected ble services')
+    ) {
+        return {
+            kind: 'incompatible',
+            title: 'Incompatible sensor',
+            message: `That device does not look like a compatible ${label}.`,
+            suggestions: [
+                'Check that the correct sensor type was chosen',
+                'Confirm the sensor supports the standard Bluetooth profiles',
+                'Some sensors need a firmware update to expose standard services',
+                "Consult the sensor's documentation for compatibility",
+            ],
             canRetry: true,
         };
     }
@@ -149,59 +204,6 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         };
     }
 
-    if (text.includes('securityerror') || text.includes('permission') || name === 'SecurityError') {
-        return {
-            kind: 'permission-denied',
-            title: 'Permission denied',
-            message: 'Bluetooth permission was denied.',
-            suggestions: [
-                'Allow Bluetooth access in the browser settings',
-                'Choose "Allow" when prompted',
-                'Reload the page and try again',
-                'Make sure the page is served over HTTPS or localhost',
-            ],
-            canRetry: true,
-        };
-    }
-
-    if (
-        text.includes('networkerror') ||
-        text.includes('timeout') ||
-        text.includes('timed out') ||
-        name === 'NetworkError'
-    ) {
-        return {
-            kind: 'timeout',
-            title: 'Connection timed out',
-            message: `The connection to the ${label} timed out.`,
-            suggestions: [
-                'Make sure the sensor is in range and powered on',
-                'Move closer to the sensor',
-                'Power cycle the sensor and try again',
-                'Check for interference from other wireless devices',
-            ],
-            canRetry: true,
-        };
-    }
-
-    if (
-        (text.includes('service') && text.includes('not found')) ||
-        text.includes('none of the expected ble services')
-    ) {
-        return {
-            kind: 'incompatible',
-            title: 'Incompatible sensor',
-            message: `That device does not look like a compatible ${label}.`,
-            suggestions: [
-                'Check that the correct sensor type was chosen',
-                'Confirm the sensor supports the standard Bluetooth profiles',
-                'Some sensors need a firmware update to expose standard services',
-                "Consult the sensor's documentation for compatibility",
-            ],
-            canRetry: true,
-        };
-    }
-
     return {
         kind: 'unknown',
         title: 'Connection error',
@@ -230,4 +232,9 @@ function nameAndMessage(error: unknown): { name: string; message: string } {
         };
     }
     return { name: '', message: String(error) };
+}
+
+/** Only a missing attribute permits probing the next candidate service. */
+export function isMissingGattAttribute(error: unknown): boolean {
+    return nameAndMessage(error).name === 'NotFoundError';
 }

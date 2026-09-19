@@ -29,6 +29,7 @@
     },
     "files": [
         "dist",
+        "src",
         "README.md",
         "LICENSE"
     ],
@@ -54,8 +55,9 @@
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "bash -O globstar -c 'tsx --test test/**/*.test.ts'",
+        "test:package": "node --test scripts/check-package.mjs",
         "test:coverage": "bash -O globstar -c 'node --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-lines=98 --test-coverage-branches=95 --test-coverage-functions=90 test/**/*.test.ts'",
-        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test:coverage && pnpm run build",
+        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test:coverage && pnpm run build && pnpm run test:package",
         "prepublishOnly": "pnpm run check"
     },
     "devDependencies": {

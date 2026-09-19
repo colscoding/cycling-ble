@@ -111,6 +111,12 @@ seconds in total before `'failed'`. A successful reconnect restores the full
 budget for the next drop. For a long ride where giving up is never right, pass
 `maxAttempts: Infinity`.
 
+`maxAttempts` must be a nonnegative safe integer or `Infinity`; `0` reports
+`failed` after a drop without attempting to reconnect. Both delays must be
+integer milliseconds from `0` through `2147483647`. A zero delay retries on
+the next timer turn without an intentional backoff. Invalid options reject
+with `RangeError` before requesting or looking up a device.
+
 #### `Logger`
 
 Any object with `debug`, `info`, `warn`, and `error` methods taking
@@ -149,7 +155,9 @@ listener. `onStatusChange` reports what happens _after_ that:
 `previousDeviceId` if you kept it.
 
 Listeners run synchronously inside the Bluetooth event handler, so keep them
-quick. A listener that throws does not stop the others or disturb
+quick. If a status listener calls `disconnect()`, its resulting status event is
+delivered after the current event has reached all listeners, preserving
+transition order. A listener that throws does not stop the others or disturb
 reconnection: its error is passed to `reportError`, which puts it in the
 console like any uncaught error and fires the window `error` event. Where
 there is no `reportError`, as in Node, it is rethrown on a later tick.
@@ -323,7 +331,8 @@ Requires Node 22 or later and pnpm (the version is pinned in `package.json`).
 pnpm install
 pnpm test               # run the suite
 pnpm run test:coverage  # run it with coverage, failing below the thresholds
-pnpm run check          # everything CI runs: types, lint, format, coverage, build
+pnpm run build && pnpm run test:package # check the packed artifact in isolation
+pnpm run check          # types, lint, format, coverage, build, packed-package check
 ```
 
 Tests use Node's built-in runner. `test/helpers/fake-bluetooth.ts` fakes the
