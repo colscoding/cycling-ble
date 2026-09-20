@@ -24,4 +24,9 @@ jobs:
             - uses: actions/setup-node@v5
               with:
                   node-version: 20.0.0
+                  # setup-node probes for a package manager cache by running
+                  # `pnpm store path`, and pnpm 11 refuses to start on Node 20.
+                  # The probe is on by default and would fail this step before
+                  # the check below runs.
+                  package-manager-cache: false
             - run: node --test scripts/check-package.mjs
