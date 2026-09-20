@@ -6,6 +6,8 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-20
+
 ### Fixed
 
 - Status listeners receive nested lifecycle transitions in order. If a listener
@@ -83,6 +85,7 @@ All notable changes to this package are recorded here. The format follows
 
 First release.
 
-[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/colscoding/cycling-ble/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/colscoding/cycling-ble/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/colscoding/cycling-ble/releases/tag/v0.1.0
