@@ -1,6 +1,6 @@
 {
     "name": "cycling-ble",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Connect to cycling power, heart rate, cadence, and FTMS trainer sensors over Web Bluetooth",
     "type": "module",
     "license": "MIT",
@@ -56,8 +56,11 @@
         "format:check": "prettier --check .",
         "test": "bash -O globstar -c 'tsx --test test/**/*.test.ts'",
         "test:package": "node --test scripts/check-package.mjs",
+        "test:release": "node --test scripts/release.test.mjs",
+        "release:dry-run": "node scripts/release.mjs --dry-run",
+        "release": "node scripts/release.mjs --publish",
         "test:coverage": "bash -O globstar -c 'node --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" --test-coverage-lines=98 --test-coverage-branches=95 --test-coverage-functions=90 test/**/*.test.ts'",
-        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test:coverage && pnpm run build && pnpm run test:package",
+        "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test:coverage && pnpm run test:release && pnpm run build && pnpm run test:package",
         "prepublishOnly": "pnpm run check"
     },
     "devDependencies": {

@@ -6,6 +6,8 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-05
+
 ### Fixed
 
 - Notification listeners attach before enabling notifications. Sensors that
@@ -13,6 +15,16 @@ All notable changes to this package are recorded here. The format follows
   sample: the newest setup reading reaches the first subscriber, or existing
   subscribers after a reconnect. Failed or cancelled setup discards it, and
   link drops detach the previous characteristic listener.
+
+### Changed
+
+- Removed GitHub Actions workflows. Checks and npm releases now run locally.
+
+### Added
+
+- A reusable direct-release script validates committed source, checks package
+  contents, loads the npm token from `.env`, and verifies the published artifact.
+  `release:dry-run` performs the checks without publishing.
 
 ## [0.1.2] - 2026-09-20
 
@@ -93,7 +105,8 @@ All notable changes to this package are recorded here. The format follows
 
 First release.
 
-[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/colscoding/cycling-ble/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/colscoding/cycling-ble/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/colscoding/cycling-ble/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/colscoding/cycling-ble/releases/tag/v0.1.0

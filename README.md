@@ -319,9 +319,9 @@ resistance, pedal balance, and torque are parsed past but not reported.
 
 ## Tested on
 
-The library is covered by a test suite that drives a simulated GATT stack, and
-that suite runs in CI. That verifies decoding and connection logic; it does not
-verify any particular device.
+The library is covered by a local test suite that drives a simulated GATT
+stack. That verifies decoding and connection logic; it does not verify any
+particular device.
 
 Hardware confirmed to work is listed here, and nothing is claimed that has not
 actually been ridden with. If your sensor works — or doesn't — an issue saying
@@ -346,7 +346,25 @@ small slice of Web Bluetooth the connect layer touches, so connection,
 reconnection, and teardown logic run without a browser or a sensor. Parser
 tests build packets byte by byte from the Bluetooth specifications.
 
-Releases are published to npm by CI when a `v*` tag is pushed.
+### Manual releases
+
+Update the version in `package.json` and the changelog, then commit the release
+changes. Set `NPM_TOKEN` in the ignored `.env` file at the repository root.
+
+```sh
+pnpm run release:dry-run # validate the release without publishing
+pnpm run release         # validate, publish to npm, and verify its integrity
+```
+
+The release script requires a clean tracked working tree and runs the full
+check in a temporary export of the committed source. It packs and inspects that
+same source, reads `.env` as data, and authenticates through a temporary npm
+configuration. The token is redacted from command output and kept out of Git
+and the package. An already-published version is refused. Local releases do
+not include CI provenance.
+
+Push the release commit and its matching `v*` tag to record the released source;
+tags do not trigger publication. GitHub workflows are currently removed.
 
 ## License
 
