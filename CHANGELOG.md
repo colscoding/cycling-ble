@@ -6,6 +6,14 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Notification listeners attach before enabling notifications. Sensors that
+  send a sample before `startNotifications()` resolves no longer lose that
+  sample: the newest setup reading reaches the first subscriber, or existing
+  subscribers after a reconnect. Failed or cancelled setup discards it, and
+  link drops detach the previous characteristic listener.
+
 ## [0.1.2] - 2026-09-20
 
 ### Fixed

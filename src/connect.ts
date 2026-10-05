@@ -101,6 +101,18 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
     let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
     let parseValue: ValueParser = () => null;
+    let ready = false;
+    let hasReadingListener = false;
+    // Keep only the newest setup sample; never accumulate a stream while the
+    // caller is awaiting the connection or has not attached its first listener.
+    let pendingReading: SensorReading | null = null;
+
+    const flushPendingReading = (): void => {
+        if (!ready || !hasReadingListener || !pendingReading) return;
+        const reading = pendingReading;
+        pendingReading = null;
+        readingListeners.emit(reading).forEach(reportError);
+    };
 
     // Neither a notification nor a reconnect has a caller to hand a listener's
     // error back to. Reporting it instead of throwing also keeps the caller's
@@ -163,6 +175,10 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         if (!fields) return;
 
         const reading: SensorReading = { timestamp: Date.now(), ...fields };
+        if (!ready || !hasReadingListener) {
+            pendingReading = reading;
+            return;
+        }
         readingListeners.emit(reading).forEach(reportError);
     };
 
@@ -210,14 +226,6 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
                 });
             }
 
-            await selected.characteristic.startNotifications();
-            if (abandoned()) return;
-            if (!gatt.connected) throw new Error('GATT server disconnected during setup');
-
-            // Everything below mutates connection state, and is deliberately after
-            // the last await: a failure or an abandonment part-way through would
-            // otherwise leave a half-wired connection behind.
-
             // Drop the previous connection's listener before rebinding. A browser
             // may hand back the same characteristic object on reconnect, and
             // subscribing twice delivers every notification twice — which silently
@@ -226,11 +234,24 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
             characteristic = selected.characteristic;
             parseValue = selected.createParser();
+            ready = false;
+            pendingReading = null;
+            // A sensor can notify before startNotifications() resolves. Listen
+            // first, but hold delivery until setup is confirmed to have succeeded.
             characteristic.addEventListener('characteristicvaluechanged', handleValueChanged);
 
+            await characteristic.startNotifications();
+            if (abandoned()) return;
+            if (!gatt.connected) throw new Error('GATT server disconnected during setup');
+
+            ready = true;
             reconnection.reset();
             notifyStatus('connected');
+            flushPendingReading();
         } catch (error) {
+            ready = false;
+            pendingReading = null;
+            characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
             // Setup can fail after opening the link. Only close our own attempt;
             // an older, abandoned operation must not disconnect its replacement.
             closeAttempt();
@@ -240,6 +261,9 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
     let initialized = false;
     const handleGattDisconnect = (): void => {
+        ready = false;
+        pendingReading = null;
+        characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
         if (initialized && !reconnection.isManualDisconnect()) {
             reconnection.handleDisconnect(connect);
         }
@@ -263,7 +287,10 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         ...(device.id ? { deviceId: device.id } : {}),
 
         addListener(listener: ReadingListener): () => void {
-            return readingListeners.add(listener);
+            const unsubscribe = readingListeners.add(listener);
+            hasReadingListener = true;
+            flushPendingReading();
+            return unsubscribe;
         },
 
         onStatusChange(listener: StatusListener): () => void {
@@ -275,6 +302,8 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             // the second call must not announce a second 'disconnected'.
             if (reconnection.isManualDisconnect()) return;
             reconnection.markManualDisconnect();
+            ready = false;
+            pendingReading = null;
             device.removeEventListener('gattserverdisconnected', handleGattDisconnect);
             if (characteristic) {
                 characteristic.removeEventListener('characteristicvaluechanged', handleValueChanged);

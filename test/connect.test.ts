@@ -335,6 +335,88 @@ describe('connectPower', () => {
 });
 
 describe('connectHeartRate', () => {
+    it('keeps a notification sent while notification setup is still completing', async () => {
+        const char = new FakeCharacteristic(HEART_RATE_MEASUREMENT);
+        const fake = createFakeBluetooth({ services: { [HEART_RATE]: { [HEART_RATE_MEASUREMENT]: char } } });
+        char.startNotifications = async () => {
+            char.emit(heartRatePacket(142));
+            char.emit(heartRatePacket(145));
+            return char;
+        };
+        const conn = await connectHeartRate({ bluetooth: fake.bluetooth });
+        try {
+            const readings: SensorReading[] = [];
+            conn.addListener((reading) => readings.push(reading));
+            assert.deepEqual(
+                readings.map((reading) => reading.heartRate),
+                [145]
+            );
+            char.emit(heartRatePacket(150));
+            assert.deepEqual(
+                readings.map((reading) => reading.heartRate),
+                [145, 150]
+            );
+            const laterReadings: SensorReading[] = [];
+            conn.addListener((reading) => laterReadings.push(reading));
+            assert.deepEqual(laterReadings, [], 'the setup sample is delivered only once');
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('receives the first notification from a new characteristic after reconnecting', async () => {
+        const original = new FakeCharacteristic(HEART_RATE_MEASUREMENT);
+        const fake = createFakeBluetooth({ services: { [HEART_RATE]: { [HEART_RATE_MEASUREMENT]: original } } });
+        const conn = await connectHeartRate({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 1 } });
+        try {
+            const readings: SensorReading[] = [];
+            conn.addListener((reading) => readings.push(reading));
+            const replacement = new FakeCharacteristic(HEART_RATE_MEASUREMENT);
+            replacement.startNotifications = async () => {
+                replacement.emit(heartRatePacket(155));
+                return replacement;
+            };
+            const service = await fake.device.gatt.getPrimaryService(HEART_RATE);
+            service.getCharacteristic = async () => replacement;
+            let reconnected = false;
+            conn.onStatusChange((status) => (reconnected ||= status === 'connected'));
+            fake.device.dropConnection();
+            await waitFor(() => reconnected);
+            assert.deepEqual(
+                readings.map((reading) => reading.heartRate),
+                [155]
+            );
+            assert.equal(original.listenerCount, 0);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('discards setup samples when restoring notifications fails', async () => {
+        const char = new FakeCharacteristic(HEART_RATE_MEASUREMENT);
+        const fake = createFakeBluetooth({ services: { [HEART_RATE]: { [HEART_RATE_MEASUREMENT]: char } } });
+        const conn = await connectHeartRate({
+            bluetooth: fake.bluetooth,
+            reconnect: { baseDelayMs: 1, maxAttempts: 1 },
+        });
+        try {
+            const readings: SensorReading[] = [];
+            conn.addListener((reading) => readings.push(reading));
+            char.startNotifications = async () => {
+                char.emit(heartRatePacket(155));
+                throw new Error('Notification setup failed');
+            };
+            let failed = false;
+            conn.onStatusChange((status) => (failed ||= status === 'failed'));
+            fake.device.dropConnection();
+            await waitFor(() => failed);
+            assert.deepEqual(readings, []);
+            assert.equal(char.listenerCount, 0);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
     it('yields heartRate readings', async () => {
         const fake = createFakeBluetooth({
             deviceName: 'HRM-Pro',

@@ -138,6 +138,12 @@ interface SensorConnection {
 
 Both subscribe methods return an unsubscribe function.
 
+Notifications can arrive while connection setup is still completing. The
+newest such reading is retained and delivered synchronously when the first
+`addListener` call attaches, so prepare your listener before subscribing. This
+is a single setup sample, not a replay of earlier readings. On reconnect, a
+setup sample is delivered to existing listeners after `connected`.
+
 `ConnectionStatus` is `'connected' | 'disconnected' | 'reconnecting' | 'failed'`.
 Note that the initial connection is signalled by `connectPower()` resolving,
 not by a `'connected'` status event — that event fires before you can attach a
