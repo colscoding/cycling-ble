@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,7 +41,60 @@ export function validateArtifact(artifact, version) {
     if (!/^sha512-/.test(artifact.integrity)) throw new Error('Package integrity is missing');
 }
 
+export async function waitForPublication(
+    readIntegrity,
+    expected,
+    { attempts = 41, intervalMs = 15000, onWait = () => {} } = {}
+) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        const integrity = await readIntegrity();
+        if (integrity) {
+            if (integrity !== expected)
+                throw new Error('Registry integrity does not match the submitted artifact; do not republish');
+            return;
+        }
+        if (attempt < attempts - 1) {
+            onWait();
+            await delay(intervalMs);
+        }
+    }
+    throw new Error(
+        'npm accepted the release but it is still processing. Run pnpm run release:verify later; do not republish'
+    );
+}
+
+async function verifyPublication(version, integrity) {
+    await waitForPublication(
+        async () => {
+            const response = await fetch(`${registry}cycling-ble/${version}?release_check=${Date.now()}`, {
+                signal: AbortSignal.timeout(15000),
+            });
+            if (response.status === 404) return null;
+            if (!response.ok)
+                throw new Error(
+                    `Registry verification returned HTTP ${response.status}; run pnpm run release:verify later`
+                );
+            return (await response.json()).dist?.integrity ?? null;
+        },
+        integrity,
+        {
+            onWait: () => console.log('npm is still processing the release; checking again in 15 seconds...'),
+        }
+    );
+    console.log(`Published and verified cycling-ble@${version}.`);
+}
+
 async function release(mode) {
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    const receiptPath = join(root, '.releases', `${version}.json`);
+    if (mode === '--verify') {
+        if (!existsSync(receiptPath)) throw new Error('No local publication receipt exists for this version');
+        const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+        await verifyPublication(version, receipt.integrity);
+        return;
+    }
+    if (existsSync(receiptPath))
+        throw new Error('This version was already submitted. Run pnpm run release:verify; do not republish');
     const token = readNpmToken(join(root, '.env'));
     const redact = (text) => text.replaceAll(token, '[REDACTED]');
     const run = (command, args, options = {}) => {
@@ -68,7 +121,7 @@ async function release(mode) {
     if (run('git', ['ls-files', '--', '.env', '.env.*'], { quiet: true }).trim()) {
         throw new Error('Credential files must not be tracked in Git');
     }
-    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    const commit = run('git', ['rev-parse', 'HEAD'], { quiet: true }).trim();
     const versions = JSON.parse(
         run('npm', ['view', 'cycling-ble', 'versions', '--json', `--registry=${registry}`], { quiet: true })
     );
@@ -78,7 +131,7 @@ async function release(mode) {
     try {
         const source = join(directory, 'source');
         mkdirSync(source);
-        const archive = execFileSync('git', ['archive', 'HEAD'], { cwd: root, maxBuffer: 20 * 1024 * 1024 });
+        const archive = execFileSync('git', ['archive', commit], { cwd: root, maxBuffer: 20 * 1024 * 1024 });
         run('tar', ['-xf', '-', '-C', source], { input: archive, quiet: true });
         symlinkSync(join(root, 'node_modules'), join(source, 'node_modules'), 'dir');
 
@@ -121,31 +174,28 @@ async function release(mode) {
                 '--tag=latest',
                 '--ignore-scripts',
                 '--provenance=false',
+                '--dry-run=false',
+                `--registry=${registry}`,
             ],
             {
                 cwd: source,
                 env: authEnvironment,
             }
         );
-        let integrity;
-        for (let attempt = 0; attempt < 5; attempt++) {
-            try {
-                integrity = JSON.parse(
-                    run(
-                        'npm',
-                        ['view', `cycling-ble@${version}`, 'dist.integrity', '--json', `--registry=${registry}`],
-                        { quiet: true }
-                    )
-                );
-                break;
-            } catch {
-                if (attempt < 4) await delay(2000);
-            }
-        }
-        if (integrity !== artifact.integrity) {
-            throw new Error('Publication completed, but registry integrity verification failed; do not republish');
-        }
-        console.log(`Published and verified cycling-ble@${version}.`);
+        mkdirSync(dirname(receiptPath), { recursive: true });
+        writeFileSync(
+            receiptPath,
+            JSON.stringify(
+                {
+                    version,
+                    integrity: artifact.integrity,
+                    commit,
+                },
+                null,
+                2
+            ) + '\n'
+        );
+        await verifyPublication(version, artifact.integrity);
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }
@@ -153,8 +203,10 @@ async function release(mode) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const args = process.argv.slice(2);
-    if (args.length !== 1 || !['--dry-run', '--publish'].includes(args[0])) {
-        console.log(`Usage: node ${join(dirname(fileURLToPath(import.meta.url)), 'release.mjs')} --dry-run|--publish`);
+    if (args.length !== 1 || !['--dry-run', '--publish', '--verify'].includes(args[0])) {
+        console.log(
+            `Usage: node ${join(dirname(fileURLToPath(import.meta.url)), 'release.mjs')} --dry-run|--publish|--verify`
+        );
         process.exitCode = args.length === 1 && args[0] === '--help' ? 0 : 1;
     } else {
         release(args[0]).catch((error) => {

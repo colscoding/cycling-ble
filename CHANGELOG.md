@@ -6,6 +6,11 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Direct releases allow time for npm's processing delay and retain a local
+  receipt so registry verification can resume without republishing.
+
 ## [0.1.3] - 2026-10-05
 
 ### Fixed

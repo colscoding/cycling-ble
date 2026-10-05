@@ -354,6 +354,7 @@ changes. Set `NPM_TOKEN` in the ignored `.env` file at the repository root.
 ```sh
 pnpm run release:dry-run # validate the release without publishing
 pnpm run release         # validate, publish to npm, and verify its integrity
+pnpm run release:verify  # resume verification if npm is still processing
 ```
 
 The release script requires a clean tracked working tree and runs the full
@@ -361,7 +362,10 @@ check in a temporary export of the committed source. It packs and inspects that
 same source, reads `.env` as data, and authenticates through a temporary npm
 configuration. The token is redacted from command output and kept out of Git
 and the package. An already-published version is refused. Local releases do
-not include CI provenance.
+not include CI provenance. npm may take several minutes to process a new
+release. The script waits for the registry and saves a credential-free receipt
+in ignored `.releases/`; use `release:verify` to resume verification without
+submitting the version again.
 
 Push the release commit and its matching `v*` tag to record the released source;
 tags do not trigger publication. GitHub workflows are currently removed.

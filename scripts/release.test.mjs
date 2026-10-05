@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { readNpmToken, validateArtifact } from './release.mjs';
+import { readNpmToken, validateArtifact, waitForPublication } from './release.mjs';
 
 const artifact = () => ({
     name: 'cycling-ble',
@@ -12,6 +12,23 @@ const artifact = () => ({
     files: ['dist/index.js', 'dist/index.d.ts', 'src/connect.ts', 'README.md', 'LICENSE', 'package.json'].map(
         (path) => ({ path })
     ),
+});
+
+test('publication verification waits for npm processing and resumes without publishing', async () => {
+    let reads = 0;
+    await waitForPublication(async () => (++reads === 3 ? 'sha512-expected' : null), 'sha512-expected', {
+        attempts: 3,
+        intervalMs: 0,
+    });
+    assert.equal(reads, 3);
+    await assert.rejects(
+        () => waitForPublication(async () => null, 'sha512-expected', { attempts: 1 }),
+        /still processing/
+    );
+    await assert.rejects(
+        () => waitForPublication(async () => 'sha512-other', 'sha512-expected', { attempts: 1 }),
+        /does not match/
+    );
 });
 
 test('release accepts the complete built package and refuses missing or mismatched artifacts', () => {
