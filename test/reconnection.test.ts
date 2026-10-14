@@ -159,6 +159,35 @@ describe('createReconnectionManager', () => {
         assert.equal(calls, 0, 'the connect fn never runs after cancellation');
     });
 
+    it('settles immediately when a reconnecting listener cancels the retry', async () => {
+        manager = createReconnectionManager({
+            sensorName: 'Test Sensor',
+            options: { baseDelayMs: 2147483647, maxDelayMs: 2147483647 },
+            onStatusChange: (status) => {
+                statuses.push(status);
+                if (status === 'reconnecting') manager.markManualDisconnect();
+            },
+        });
+        let calls = 0;
+        let settled = false;
+        const pending = manager.attemptReconnect(async () => {
+            calls++;
+        });
+        void pending.then(() => {
+            settled = true;
+        });
+
+        try {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            assert.equal(settled, true, 'cancellation must not wait for the backoff timer');
+            assert.equal(calls, 0);
+            assert.deepEqual(statuses, ['reconnecting']);
+        } finally {
+            manager.cancel();
+            await pending;
+        }
+    });
+
     it('stops retrying when cancelled while a failing attempt is in flight', async () => {
         const m = make({ maxAttempts: 5, baseDelayMs: 1 });
         let calls = 0;

@@ -99,6 +99,8 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             logger.info(`[${sensorName}] reconnection attempt ${attempts}/${maxAttempts} in ${delay}ms`);
             notify('reconnecting');
 
+            // A status listener may disconnect before a timer exists to cancel.
+            if (cancelled) return;
             const proceed = await sleep(delay);
             if (!proceed || cancelled) {
                 logger.info(`[${sensorName}] reconnection cancelled`);

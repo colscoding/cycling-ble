@@ -3,3 +3,6 @@ pnpm-lock.yaml
 
 # Git ignores these through a nested .gitignore, which Prettier does not read.
 .remember/
+
+# Local editor settings can also be ignored by Git's global configuration.
+.claude/settings.local.json
