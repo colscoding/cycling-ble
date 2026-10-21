@@ -182,6 +182,14 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
         readingListeners.emit(reading).forEach(reportError);
     };
 
+    // Every path that ends or replaces a binding goes through here, so none
+    // can leave a stale listener or setup sample behind.
+    const detach = (): void => {
+        ready = false;
+        pendingReading = null;
+        characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
+    };
+
     const connect = async (): Promise<void> => {
         const attempt = Symbol();
         latestGattAttempts.set(gatt, attempt);
@@ -230,12 +238,9 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             // may hand back the same characteristic object on reconnect, and
             // subscribing twice delivers every notification twice — which silently
             // doubles the recorded sample rate rather than failing visibly.
-            characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
-
+            detach();
             characteristic = selected.characteristic;
             parseValue = selected.createParser();
-            ready = false;
-            pendingReading = null;
             // A sensor can notify before startNotifications() resolves. Listen
             // first, but hold delivery until setup is confirmed to have succeeded.
             characteristic.addEventListener('characteristicvaluechanged', handleValueChanged);
@@ -249,9 +254,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             notifyStatus('connected');
             flushPendingReading();
         } catch (error) {
-            ready = false;
-            pendingReading = null;
-            characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
+            detach();
             // Setup can fail after opening the link. Only close our own attempt;
             // an older, abandoned operation must not disconnect its replacement.
             closeAttempt();
@@ -261,9 +264,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
 
     let initialized = false;
     const handleGattDisconnect = (): void => {
-        ready = false;
-        pendingReading = null;
-        characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
+        detach();
         if (initialized && !reconnection.isManualDisconnect()) {
             reconnection.handleDisconnect(connect);
         }
@@ -302,13 +303,9 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             // the second call must not announce a second 'disconnected'.
             if (reconnection.isManualDisconnect()) return;
             reconnection.markManualDisconnect();
-            ready = false;
-            pendingReading = null;
             device.removeEventListener('gattserverdisconnected', handleGattDisconnect);
-            if (characteristic) {
-                characteristic.removeEventListener('characteristicvaluechanged', handleValueChanged);
-                characteristic.stopNotifications().catch((e) => logger.debug('stopNotifications failed', e));
-            }
+            detach();
+            characteristic?.stopNotifications().catch((e) => logger.debug('stopNotifications failed', e));
             gatt.disconnect();
             // The mock reports this too. A caller rendering state purely from
             // onStatusChange must not be left showing "connected".

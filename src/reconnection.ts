@@ -64,18 +64,18 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
     /** Set once 'failed' is reported. Until reset(), further drops are ignored. */
     let gaveUp = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let pendingResolve: ((proceed: boolean) => void) | null = null;
+    let pendingResolve: (() => void) | null = null;
 
     const notify = (status: ConnectionStatus): void => onStatusChange?.(status);
 
-    /** Sleep that resolves false if cancelled, so a pending retry never hangs. */
-    const sleep = (ms: number): Promise<boolean> =>
+    /** Sleep that cancel() cuts short, so a pending retry never hangs. */
+    const sleep = (ms: number): Promise<void> =>
         new Promise((resolve) => {
             pendingResolve = resolve;
             timeoutId = setTimeout(() => {
                 timeoutId = null;
                 pendingResolve = null;
-                resolve(!cancelled);
+                resolve();
             }, ms);
         });
 
@@ -101,8 +101,8 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
 
             // A status listener may disconnect before a timer exists to cancel.
             if (cancelled) return;
-            const proceed = await sleep(delay);
-            if (!proceed || cancelled) {
+            await sleep(delay);
+            if (cancelled) {
                 logger.info(`[${sensorName}] reconnection cancelled`);
                 return;
             }
@@ -124,7 +124,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             clearTimeout(timeoutId);
             timeoutId = null;
         }
-        pendingResolve?.(false);
+        pendingResolve?.();
         pendingResolve = null;
     };
 
