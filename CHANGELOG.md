@@ -6,8 +6,14 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-21
+
 ### Fixed
 
+- Calling `disconnect()` from a status listener as it receives `'reconnecting'`
+  no longer leaves the backoff timer running. Reconnection was already
+  cancelled, but the retry did not settle until its delay expired — up to
+  `maxDelayMs` — and the pending timer held a Node process open that long.
 - Direct releases allow time for npm's processing delay and retain a local
   receipt so registry verification can resume without republishing.
 
@@ -110,7 +116,8 @@ All notable changes to this package are recorded here. The format follows
 
 First release.
 
-[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/colscoding/cycling-ble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/colscoding/cycling-ble/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/colscoding/cycling-ble/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/colscoding/cycling-ble/compare/v0.1.0...v0.1.1
