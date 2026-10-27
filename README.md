@@ -339,8 +339,9 @@ stack. That verifies decoding and connection logic; it does not verify any
 particular device.
 
 Hardware confirmed to work is listed here, and nothing is claimed that has not
-actually been ridden with. If your sensor works — or doesn't — an issue saying
-which model would genuinely help.
+actually been ridden with. If your sensor works — or doesn't — a
+[hardware report](https://github.com/colscoding/cycling-ble/issues/new?template=hardware-report.yml)
+saying which model would genuinely help.
 
 - _(none recorded yet)_
 

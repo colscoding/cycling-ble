@@ -1,0 +1,59 @@
+name: Hardware report
+description: Say whether cycling-ble works with your sensor or trainer.
+title: '[Hardware] '
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Reports like this are how the README's "Tested on" list grows. A sensor that works is as useful to hear about as one that doesn't.
+    - type: input
+      id: model
+      attributes:
+          label: Make and model
+          placeholder: The name printed on the sensor, trainer, or its box
+      validations:
+          required: true
+    - type: dropdown
+      id: connect-function
+      attributes:
+          label: Connect function
+          options:
+              - connectPower
+              - connectHeartRate
+              - connectCadence
+      validations:
+          required: true
+    - type: dropdown
+      id: result
+      attributes:
+          label: Did it work?
+          options:
+              - Works
+              - Works partly
+              - Does not work
+      validations:
+          required: true
+    - type: input
+      id: environment
+      attributes:
+          label: Browser and operating system
+          placeholder: For example, Chrome on Android, or Edge on Windows
+      validations:
+          required: true
+    - type: input
+      id: version
+      attributes:
+          label: cycling-ble version
+      validations:
+          required: true
+    - type: textarea
+      id: details
+      attributes:
+          label: What happened
+          description: Which readings arrived (power, cadence, heart rate), and anything missing, wrong, or intermittent.
+    - type: textarea
+      id: logs
+      attributes:
+          label: Log output
+          description: 'Pass `logger: console` to the connect function and paste what it prints, including any malformed-packet warnings.'
+          render: text
