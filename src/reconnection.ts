@@ -8,17 +8,17 @@ const DEFAULT_MAX_DELAY_MS = 10_000;
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
 export interface ReconnectionManager {
-    /** Run one backoff cycle, retrying until success or exhaustion. */
-    attemptReconnect(connectFn: () => Promise<void>): Promise<void>;
-    /** Call from a disconnect event: reports the drop, then reconnects. */
-    handleDisconnect(connectFn: () => Promise<void>): void;
-    /** Record that the caller asked to disconnect, suppressing reconnection. */
+    /**
+     * Call from a disconnect event: reports the drop, then reconnects with
+     * backoff until success or exhaustion. Resolves once the reconnection this
+     * call started has ended, or at once if it started none.
+     */
+    handleDisconnect(connectFn: () => Promise<void>): Promise<void>;
+    /** Record that the caller asked to disconnect: cancel any pending retry and stop reconnecting. */
     markManualDisconnect(): void;
     isManualDisconnect(): boolean;
-    /** Clear the attempt counter and the manual, cancelled, and gave-up flags. */
+    /** Clear the attempt counter and the manual and gave-up flags. */
     reset(): void;
-    /** Cancel any pending retry and stop reconnecting. */
-    cancel(): void;
 }
 
 export interface ReconnectionConfig {
@@ -60,7 +60,6 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
     let attempts = 0;
     let reconnecting = false;
     let manualDisconnect = false;
-    let cancelled = false;
     /** Set once 'failed' is reported. Until reset(), further drops are ignored. */
     let gaveUp = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -68,7 +67,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
 
     const notify = (status: ConnectionStatus): void => onStatusChange?.(status);
 
-    /** Sleep that cancel() cuts short, so a pending retry never hangs. */
+    /** Sleep that markManualDisconnect() cuts short, so a pending retry never hangs. */
     const sleep = (ms: number): Promise<void> =>
         new Promise((resolve) => {
             pendingResolve = resolve;
@@ -83,8 +82,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
         // A loop rather than a retry that awaits itself: with maxAttempts set to
         // Infinity, recursion would chain one more pending promise per failed
         // attempt for as long as the outage lasts.
-        // markManualDisconnect() cancels as well, so `cancelled` covers it.
-        while (enabled && !cancelled) {
+        while (enabled && !manualDisconnect) {
             if (attempts >= maxAttempts) {
                 logger.error(`[${sensorName}] max reconnection attempts reached`);
                 gaveUp = true;
@@ -100,9 +98,9 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             notify('reconnecting');
 
             // A status listener may disconnect before a timer exists to cancel.
-            if (cancelled) return;
+            if (manualDisconnect) return;
             await sleep(delay);
-            if (cancelled) {
+            if (manualDisconnect) {
                 logger.info(`[${sensorName}] reconnection cancelled`);
                 return;
             }
@@ -118,32 +116,20 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
         }
     };
 
-    const cancel = (): void => {
-        cancelled = true;
-        if (timeoutId !== null) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-        }
-        pendingResolve?.();
-        pendingResolve = null;
-    };
-
     return {
-        attemptReconnect,
-
-        handleDisconnect(connectFn: () => Promise<void>): void {
+        handleDisconnect(connectFn: () => Promise<void>): Promise<void> {
             // A browser can report the same drop more than once, and another can
             // arrive while a retry is already in flight. Without this guard each
             // event starts its own backoff chain and they race each other.
             // After giving up, a late event — such as the one fired by closing a
             // half-open link — must not reopen a connection reported as failed.
-            if (manualDisconnect || reconnecting || gaveUp) return;
+            if (manualDisconnect || reconnecting || gaveUp) return Promise.resolve();
 
             notify('disconnected');
-            if (!enabled) return;
+            if (!enabled) return Promise.resolve();
 
             reconnecting = true;
-            attemptReconnect(connectFn)
+            return attemptReconnect(connectFn)
                 .catch((e) => logger.error(`[${sensorName}] reconnect failed:`, e))
                 .finally(() => {
                     reconnecting = false;
@@ -152,7 +138,12 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
 
         markManualDisconnect(): void {
             manualDisconnect = true;
-            cancel();
+            if (timeoutId !== null) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            pendingResolve?.();
+            pendingResolve = null;
         },
 
         isManualDisconnect: () => manualDisconnect,
@@ -160,10 +151,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
         reset(): void {
             attempts = 0;
             manualDisconnect = false;
-            cancelled = false;
             gaveUp = false;
         },
-
-        cancel,
     };
 }

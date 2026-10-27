@@ -267,7 +267,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     const handleGattDisconnect = (): void => {
         detach();
         if (initialized && !reconnection.isManualDisconnect()) {
-            reconnection.handleDisconnect(connect);
+            void reconnection.handleDisconnect(connect);
         }
     };
     device.addEventListener('gattserverdisconnected', handleGattDisconnect);
