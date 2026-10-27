@@ -6,6 +6,37 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+### Fixed
+
+- CommonJS code can `require()` the package and its subpaths on Node 22.12
+  and later. Every entry point was exported only under the `"import"`
+  condition, which `require()` does not match, so it failed with
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`. `cycling-ble/package.json` is exported too.
+- `classifyBluetoothError` reports a cancelled chooser as "Pairing with the
+  sensor was cancelled." The message used to open with the lowercase sensor
+  label: "sensor pairing was cancelled."
+
+### Changed
+
+- Requires Node 22 or later. Node 20 reached end of life on 2026-04-30, and
+  nothing has tested the package on it since 0.1.3.
+
+### Added
+
+- `connectPower` reports cadence from power meters that include crank
+  revolution data in their measurements, in the same reading as power. As
+  with `connectCadence`, cadence needs two crank samples, so the first
+  reading after connecting or reconnecting carries power alone.
+- `parsePowerCadence` in `cycling-ble/parsers` decodes that cadence on its
+  own, threading the same `CadenceState` as `parseCadenceMeasurement`.
+- Mock sensors have `simulateStatus(status)`. It reports a status to status
+  listeners as a real connection would, and holds readings back until the
+  simulated link is `connected` again, so a UI's `reconnecting` and `failed`
+  states can be exercised without hardware.
+- A hardware report issue form, linked from the README's "Tested on" list.
+
 ## [0.1.4] - 2026-10-21
 
 ### Fixed
@@ -116,7 +147,8 @@ All notable changes to this package are recorded here. The format follows
 
 First release.
 
-[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/colscoding/cycling-ble/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/colscoding/cycling-ble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/colscoding/cycling-ble/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/colscoding/cycling-ble/compare/v0.1.1...v0.1.2
