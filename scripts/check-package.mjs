@@ -68,6 +68,20 @@ for (const create of [createMockPowerSensor, createMockHeartRateSensor, createMo
         );
         run(process.execPath, ['smoke.mjs']);
 
+        // Node can require() an ES module, but only through an export condition
+        // that require() matches; an "import"-only map is invisible to it.
+        writeFileSync(
+            join(consumer, 'smoke.cjs'),
+            `
+const assert = require('node:assert/strict');
+assert.equal(typeof require('cycling-ble').connectPower, 'function');
+assert.equal(typeof require('cycling-ble/parsers').parsePowerMeasurement, 'function');
+assert.equal(typeof require('cycling-ble/mock').createMockPowerSensor, 'function');
+assert.equal(require('cycling-ble/package.json').name, 'cycling-ble');
+`
+        );
+        run(process.execPath, ['smoke.cjs']);
+
         writeFileSync(
             join(consumer, 'consumer.ts'),
             `

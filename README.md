@@ -20,6 +20,8 @@ FTMS smart trainers over Web Bluetooth. Zero runtime dependencies.
 npm install cycling-ble
 ```
 
+The package is ESM. CommonJS code can `require()` it on Node 22.12 or later.
+
 ## Quick start
 
 ```ts

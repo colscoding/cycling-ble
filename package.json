@@ -36,16 +36,17 @@
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
-            "import": "./dist/index.js"
+            "default": "./dist/index.js"
         },
         "./parsers": {
             "types": "./dist/parsers/index.d.ts",
-            "import": "./dist/parsers/index.js"
+            "default": "./dist/parsers/index.js"
         },
         "./mock": {
             "types": "./dist/mock.d.ts",
-            "import": "./dist/mock.js"
-        }
+            "default": "./dist/mock.js"
+        },
+        "./package.json": "./package.json"
     },
     "sideEffects": false,
     "scripts": {
