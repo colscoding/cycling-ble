@@ -77,7 +77,7 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         return {
             kind: 'cancelled',
             title: 'Connection cancelled',
-            message: `${label} pairing was cancelled.`,
+            message: `Pairing with the ${label} was cancelled.`,
             suggestions: [],
             canRetry: true,
         };

@@ -209,7 +209,8 @@ describe('classifyBluetoothError', () => {
             const info = classifyBluetoothError(error);
             kinds.add(info.kind);
             assert.ok(info.title.length > 0, `${info.kind} has a title`);
-            assert.ok(info.message.length > 0, `${info.kind} has a message`);
+            // The default label is lowercase, so a message may not open with it.
+            assert.match(info.message, /^[A-Z].*\.$/, `${info.kind} message is a sentence`);
             assert.equal(info.suggestions.length === 0, info.kind === 'cancelled', `${info.kind} suggestions`);
         }
         assert.equal(kinds.size, 8, 'the samples cover every kind');
