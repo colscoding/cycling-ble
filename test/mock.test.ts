@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMockPowerSensor, createMockHeartRateSensor, createMockCadenceSensor } from '../src/mock.js';
-import type { SensorReading } from '../src/types.js';
+import type { ConnectionStatus, SensorReading } from '../src/types.js';
 import { waitFor } from './helpers/fake-bluetooth.js';
 
 describe('mock sensors', () => {
@@ -162,6 +162,70 @@ describe('mock sensors', () => {
     });
 });
 
+describe('mock sensor simulated status changes', () => {
+    it('reports each simulated status to status listeners', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: ConnectionStatus[] = [];
+        sensor.onStatusChange((s) => statuses.push(s));
+        sensor.simulateStatus('disconnected');
+        sensor.simulateStatus('reconnecting');
+        sensor.simulateStatus('connected');
+        assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'connected']);
+        sensor.disconnect();
+    });
+
+    it('drops emitted readings while the simulated link is down, as a real connection would', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const readings: SensorReading[] = [];
+        sensor.addListener((r) => readings.push(r));
+        sensor.simulateStatus('reconnecting');
+        sensor.emit({ power: 200 });
+        assert.equal(readings.length, 0);
+        sensor.simulateStatus('connected');
+        sensor.emit({ power: 210 });
+        assert.deepEqual(
+            readings.map((r) => r.power),
+            [210]
+        );
+        sensor.disconnect();
+    });
+
+    it('stops generated readings after a simulated failure', async () => {
+        const sensor = createMockPowerSensor({ intervalMs: 5 });
+        const readings: SensorReading[] = [];
+        sensor.addListener((r) => readings.push(r));
+        await waitFor(() => readings.length >= 1, 1000, 'a reading');
+        sensor.simulateStatus('failed');
+        const count = readings.length;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(readings.length, count);
+        sensor.disconnect();
+    });
+
+    it('still reports disconnected when disconnect() follows a simulated failure', () => {
+        // The README tells callers to disconnect() a failed connection.
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: ConnectionStatus[] = [];
+        sensor.onStatusChange((s) => statuses.push(s));
+        sensor.simulateStatus('failed');
+        sensor.disconnect();
+        assert.deepEqual(statuses, ['failed', 'disconnected']);
+    });
+
+    it('ignores simulated statuses once disconnected', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: ConnectionStatus[] = [];
+        const readings: SensorReading[] = [];
+        sensor.onStatusChange((s) => statuses.push(s));
+        sensor.addListener((r) => readings.push(r));
+        sensor.disconnect();
+        sensor.simulateStatus('connected');
+        sensor.emit({ power: 200 });
+        assert.deepEqual(statuses, ['disconnected']);
+        assert.equal(readings.length, 0);
+    });
+});
+
 describe('mock sensor listeners that throw', () => {
     // emit() is called by the test itself, so the error belongs to that
     // caller: it is rethrown, but only after every listener has run.
@@ -176,6 +240,20 @@ describe('mock sensor listeners that throw', () => {
 
         assert.throws(() => sensor.emit({ power: 200 }), /assertion inside a listener/);
         assert.equal(readings.length, 1);
+        sensor.disconnect();
+    });
+
+    it('notifies every status listener, then throws from simulateStatus()', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const statuses: ConnectionStatus[] = [];
+        const off = sensor.onStatusChange(() => {
+            throw new Error('ui bug');
+        });
+        sensor.onStatusChange((s) => statuses.push(s));
+
+        assert.throws(() => sensor.simulateStatus('reconnecting'), /ui bug/);
+        assert.deepEqual(statuses, ['reconnecting']);
+        off();
         sensor.disconnect();
     });
 

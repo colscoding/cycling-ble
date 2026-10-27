@@ -93,6 +93,7 @@ const bluetooth: BluetoothAdapter = { requestDevice: async () => ({}) };
 const connection: Promise<SensorConnection> = connectPower({ bluetooth });
 const mock: MockSensorConnection = createMockPowerSensor({ autoStart: false });
 mock.emit({ power: 250 });
+mock.simulateStatus('reconnecting');
 void connection;
 void parseIndoorBikeData;
 void parseCadenceMeasurement;

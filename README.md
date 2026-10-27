@@ -290,7 +290,18 @@ sensor.disconnect();
 // Or drive it yourself, which is what you want in a test — no wall-clock wait.
 const manual = createMockPowerSensor({ autoStart: false });
 manual.emit({ power: 250 });
+
+// Walk a UI through a dropout without switching a sensor off.
+manual.simulateStatus('disconnected');
+manual.simulateStatus('reconnecting');
+manual.simulateStatus('connected');
 ```
+
+`simulateStatus` reports a status to `onStatusChange` listeners as a real
+connection would. Readings flow only while the simulated status is
+`'connected'`, so after `'disconnected'`, `'reconnecting'`, or `'failed'` the
+mock goes quiet — generated readings and `emit()` calls alike — until it is
+sent `'connected'` again. After `disconnect()` it is ignored.
 
 Every listener receives each reading even if one throws. Unlike a real
 connection, a mock then rethrows the first error from `emit()` or

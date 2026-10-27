@@ -27,6 +27,16 @@ export interface MockSensorConnection extends SensorConnection {
      * waiting on generated values.
      */
     emit(fields: Omit<SensorReading, 'timestamp'>): void;
+
+    /**
+     * Report a lifecycle status as a real connection would, to exercise UI
+     * states such as `reconnecting` and `failed` without hardware.
+     *
+     * Readings flow only while the simulated status is `connected`: a real
+     * link that is down delivers nothing, so generated readings and `emit()`
+     * are dropped until then. Ignored after `disconnect()`.
+     */
+    simulateStatus(status: ConnectionStatus): void;
 }
 
 function createMockSensor(
@@ -39,7 +49,9 @@ function createMockSensor(
     const readingListeners = createListeners<SensorReading>();
     const statusListeners = createListeners<ConnectionStatus>();
     let timer: ReturnType<typeof setInterval> | undefined;
-    let disconnected = false;
+    // disconnect() is final; a simulated drop only takes the link down.
+    let stopped = false;
+    let linkUp = true;
 
     // Unlike a real connection, the caller triggers delivery here — usually a
     // test calling emit() — so a listener's error goes back to that caller, as
@@ -53,7 +65,7 @@ function createMockSensor(
     };
 
     const emit = (fields: Omit<SensorReading, 'timestamp'>): void => {
-        if (disconnected) return;
+        if (stopped || !linkUp) return;
         const reading: SensorReading = { timestamp: Date.now(), ...fields };
         throwFirst(readingListeners.emit(reading));
     };
@@ -75,12 +87,17 @@ function createMockSensor(
             return statusListeners.add(listener);
         },
         disconnect(): void {
-            if (disconnected) return;
+            if (stopped) return;
             clearInterval(timer);
-            disconnected = true;
+            stopped = true;
             notifyStatus('disconnected');
         },
         emit,
+        simulateStatus(status: ConnectionStatus): void {
+            if (stopped) return;
+            linkUp = status === 'connected';
+            notifyStatus(status);
+        },
     };
 }
 
