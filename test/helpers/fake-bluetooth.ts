@@ -250,6 +250,16 @@ export function powerPacket(watts: number): DataView {
     return v;
 }
 
+/** A Cycling Power Measurement payload carrying watts and crank revolution data. */
+export function powerCrankPacket(watts: number, revs: number, timeUnits: number): DataView {
+    const v = new DataView(new ArrayBuffer(8));
+    v.setUint16(0, 0x0020, true);
+    v.setInt16(2, watts, true);
+    v.setUint16(4, revs, true);
+    v.setUint16(6, timeUnits, true);
+    return v;
+}
+
 /** An FTMS Indoor Bike Data payload with instantaneous cadence and power. */
 export function indoorBikePacket(rpm: number, watts: number): DataView {
     const v = new DataView(new ArrayBuffer(6));

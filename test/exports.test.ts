@@ -56,6 +56,7 @@ describe('public surface', () => {
             'parseCadenceMeasurement',
             'parseHeartRateMeasurement',
             'parseIndoorBikeData',
+            'parsePowerCadence',
             'parsePowerMeasurement',
         ]);
     });

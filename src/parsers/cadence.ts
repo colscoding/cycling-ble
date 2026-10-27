@@ -76,9 +76,16 @@ export function parseCadenceMeasurement(value: DataView, state: CadenceState): C
 
     // Wheel data, when present, occupies 6 bytes between the flags and the
     // crank fields: a uint32 revolution count and a uint16 event time.
-    const crankRevs = value.getUint16(offset, true);
-    const crankTime = value.getUint16(offset + 2, true);
+    return crankCadence(value.getUint16(offset, true), value.getUint16(offset + 2, true), state);
+}
 
+/**
+ * Derive cadence from a cumulative crank sample and the one before it.
+ *
+ * Shared by CSC and Cycling Power, which encode crank data identically: a
+ * uint16 revolution count and a uint16 event time in 1/1024 second units.
+ */
+export function crankCadence(crankRevs: number, crankTime: number, state: CadenceState): CadenceParseResult {
     const newState: CadenceState = { lastCrankRevs: crankRevs, lastCrankTime: crankTime };
 
     if (state.lastCrankRevs === null || state.lastCrankTime === null) {

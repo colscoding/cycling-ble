@@ -47,12 +47,13 @@ test('packed package supports isolated imports, declarations, and source navigat
             `
 import assert from 'node:assert/strict';
 import { connectPower, connectCadence, connectHeartRate, classifyBluetoothError } from 'cycling-ble';
-import { parsePowerMeasurement, parseIndoorBikeData, parseHeartRateMeasurement, parseCadenceMeasurement, initialCadenceState } from 'cycling-ble/parsers';
+import { parsePowerMeasurement, parsePowerCadence, parseIndoorBikeData, parseHeartRateMeasurement, parseCadenceMeasurement, initialCadenceState } from 'cycling-ble/parsers';
 import { createMockPowerSensor, createMockHeartRateSensor, createMockCadenceSensor } from 'cycling-ble/mock';
 for (const connect of [connectPower, connectCadence, connectHeartRate]) assert.equal(typeof connect, 'function');
 assert.equal(classifyBluetoothError(new Error('GATT operation failed')).kind, 'connection-failed');
 const view = bytes => new DataView(Uint8Array.from(bytes).buffer);
 assert.equal(parsePowerMeasurement(view([0, 0, 250, 0])), 250);
+assert.equal(parsePowerCadence(view([0x20, 0, 250, 0, 0, 0, 0, 0]), initialCadenceState).rpm, null);
 assert.equal(parseHeartRateMeasurement(view([0, 72])), 72);
 assert.deepEqual(parseIndoorBikeData(view([0x45, 0, 180, 0, 250, 0])), { powerW: 250, cadenceRpm: 90 });
 assert.equal(parseCadenceMeasurement(view([2, 0, 0, 0, 0]), initialCadenceState).rpm, null);

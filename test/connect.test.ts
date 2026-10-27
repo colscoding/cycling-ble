@@ -7,6 +7,7 @@ import {
     FakeCharacteristic,
     createFakeBluetooth,
     powerPacket,
+    powerCrankPacket,
     indoorBikePacket,
     heartRatePacket,
     cscPacket,
@@ -66,6 +67,48 @@ describe('connectPower', () => {
         assert.equal(readings.length, 1);
         assert.equal(readings[0]!.power, 245);
         assert.equal(readings[0]!.cadence, 90, 'cadence rides along in the same frame');
+    });
+
+    it("reports cadence from a power meter's crank data in the same frame as power", async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth });
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
+        char.emit(powerCrankPacket(240, 10, 1024));
+        char.emit(powerCrankPacket(250, 11, 2048));
+
+        assert.equal(readings.length, 2, 'power is reported from the first sample');
+        assert.equal('cadence' in readings[0]!, false, 'cadence needs a second sample');
+        assert.equal(readings[1]!.power, 250);
+        assert.equal(readings[1]!.cadence, 60);
+    });
+
+    it("starts a power meter's cadence afresh after reconnecting", async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({
+            bluetooth: fake.bluetooth,
+            reconnect: { baseDelayMs: 5, maxAttempts: 2 },
+        });
+
+        const readings: SensorReading[] = [];
+        conn.addListener((r) => readings.push(r));
+        const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
+        char.emit(powerCrankPacket(240, 10, 1024));
+        char.emit(powerCrankPacket(250, 11, 2048));
+        assert.equal(readings[1]!.cadence, 60, 'baseline: cadence flows before the drop');
+
+        let reconnected = false;
+        conn.onStatusChange((s) => (reconnected ||= s === 'connected'));
+        fake.device.dropConnection();
+        await waitFor(() => reconnected, 1000, "'connected'");
+
+        // A plausible delta across the gap (9 revs in 10 s), so only a stale
+        // parser, not the plausibility ceiling, could produce a cadence here.
+        char.emit(powerCrankPacket(260, 20, 2048 + 10 * 1024));
+        assert.equal(readings.length, 3);
+        assert.equal('cadence' in readings[2]!, false, 'the first sample after reconnect has no cadence');
     });
 
     it('exposes the device name and id', async () => {

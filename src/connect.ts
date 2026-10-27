@@ -16,6 +16,7 @@ import {
     parseCadenceMeasurement,
     parseHeartRateMeasurement,
     parseIndoorBikeData,
+    parsePowerCadence,
     parsePowerMeasurement,
     type CadenceState,
 } from './parsers/index.js';
@@ -316,8 +317,19 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     return connection;
 }
 
-/** Cycling Power Measurement: a single instantaneous power value. */
-const cyclingPowerParser = (): ValueParser => (value) => ({ power: parsePowerMeasurement(value) });
+/**
+ * Cycling Power Measurement: instantaneous power, plus cadence when the meter
+ * includes crank data. Cadence is a delta, so each connection starts fresh.
+ */
+const cyclingPowerParser = (): ValueParser => {
+    let state: CadenceState = initialCadenceState;
+    return (value) => {
+        const power = parsePowerMeasurement(value);
+        const result = parsePowerCadence(value, state);
+        state = result.state;
+        return { power, ...(result.rpm === null ? {} : { cadence: result.rpm }) };
+    };
+};
 
 /**
  * FTMS Indoor Bike Data: power and cadence arrive together, so both go into

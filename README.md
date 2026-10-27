@@ -66,7 +66,11 @@ than truthiness — `0 W` is a real reading.
 
 Connects to a power source. Prefers the Cycling Power Service (`0x1818`); if
 the device does not expose it, falls back to the Fitness Machine Service
-(`0x1826`). An FTMS trainer yields cadence alongside power in the same reading.
+(`0x1826`). Cadence arrives alongside power in the same reading when the
+device reports it: an FTMS trainer directly, or a power meter through the
+crank revolution data in its measurements. A power meter's cadence is a
+delta between crank samples, so it behaves like [`connectCadence`](#connectcadenceoptions):
+the first reading after connecting has no cadence.
 
 ### `connectHeartRate(options?)`
 
@@ -245,6 +249,7 @@ makes them useful for decoding recorded captures:
 | Function                               | Takes                     | Returns                                      |
 | -------------------------------------- | ------------------------- | -------------------------------------------- |
 | `parsePowerMeasurement(view)`          | Cycling Power Measurement | watts (`number`)                             |
+| `parsePowerCadence(view, state)`       | Cycling Power Measurement | `{ rpm, state }`, `rpm` may be null          |
 | `parseHeartRateMeasurement(view)`      | Heart Rate Measurement    | bpm (`number`)                               |
 | `parseCadenceMeasurement(view, state)` | CSC Measurement           | `{ rpm, state }`, `rpm` may be null          |
 | `parseIndoorBikeData(view)`            | FTMS Indoor Bike Data     | `{ powerW, cadenceRpm }`, either may be null |
@@ -254,9 +259,9 @@ import { parseIndoorBikeData, parseCadenceMeasurement, initialCadenceState } fro
 
 const { powerW, cadenceRpm } = parseIndoorBikeData(dataView);
 
-// parseCadenceMeasurement is the one stateful parser: thread its `state`
-// through successive calls, starting from initialCadenceState. That starting
-// object is frozen and shared, so reassign your variable — never write to it.
+// The two cadence parsers are stateful: thread `state` through successive
+// calls, starting from initialCadenceState. That starting object is frozen
+// and shared, so reassign your variable — never write to it.
 let state = initialCadenceState;
 const result = parseCadenceMeasurement(dataView, state);
 state = result.state;
@@ -296,7 +301,7 @@ that called it.
 
 | Service                   | UUID     | Characteristic            | Yields             |
 | ------------------------- | -------- | ------------------------- | ------------------ |
-| Cycling Power             | `0x1818` | Cycling Power Measurement | `power`            |
+| Cycling Power             | `0x1818` | Cycling Power Measurement | `power`, `cadence` |
 | Heart Rate                | `0x180D` | Heart Rate Measurement    | `heartRate`        |
 | Cycling Speed and Cadence | `0x1816` | CSC Measurement           | `cadence`          |
 | Fitness Machine (FTMS)    | `0x1826` | Indoor Bike Data          | `power`, `cadence` |
@@ -306,14 +311,11 @@ resistance, pedal balance, and torque are parsed past but not reported.
 
 ## Known limitations
 
-- **Cadence from a power meter.** Many crank power meters report cadence
-  inside the Cycling Power Measurement rather than through a separate CSC
-  service. That field is not decoded yet, so `connectPower` yields only
-  `power` from such a meter.
 - **One device, two connections.** A page has one GATT connection per physical
   device, so `connectPower` and `connectCadence` on the same device share it.
   Calling `disconnect()` on one drops the link under the other, whose
-  automatic reconnection then brings it back.
+  automatic reconnection then brings it back. A power meter that reports
+  crank data needs only `connectPower`, which already yields its cadence.
 - **FTMS Resistance Level width.** FTMS v1.0 gives this field as two bytes and
   the later Bluetooth specification supplement gives one. The parser follows
   FTMS v1.0. A trainer that follows the other reading _and_ reports resistance
