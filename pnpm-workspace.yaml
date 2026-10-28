@@ -1,3 +1,19 @@
+# Supply-chain policy, the same as the app that consumes this package. The
+# release runs this repo's dev tools on a machine holding the npm publish token,
+# so a hijacked release of any of them is a route to publishing as us.
+#
+# A version stays invisible to the resolver until it is 24 hours old, which is
+# usually long enough for a malicious release to be caught and pulled.
+minimumReleaseAge: 1440
+# Transitive dependencies come from the registry only: no git or tarball URLs.
+blockExoticSubdeps: true
+# Store contents are re-hashed rather than trusted.
+verifyStoreIntegrity: true
+strictStorePkgContentCheck: true
+# Refuse a version published with weaker trust evidence (provenance, trusted
+# publishing) than earlier ones, the usual sign of a stolen publish token.
+trustPolicy: no-downgrade
+
 # esbuild (pulled in by tsx) ships its binary via optional platform packages
 # such as @esbuild/linux-x64, so the install script is only a legacy download
 # fallback and is deliberately not run.

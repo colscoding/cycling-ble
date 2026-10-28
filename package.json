@@ -67,13 +67,13 @@
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@types/node": "^26.6.5",
-        "@types/web-bluetooth": "^0.0.21",
+        "@types/node": "^24.19.2",
+        "@types/web-bluetooth": "^0.0.22",
         "eslint": "^10.13.0",
         "prettier": "^3.9.10",
         "tsx": "^4.23.15",
-        "typescript": "^6.0.3",
-        "typescript-eslint": "^8.72.0"
+        "typescript": "~6.0.3",
+        "typescript-eslint": "^8.72.1"
     },
-    "packageManager": "pnpm@11.25.0"
+    "packageManager": "pnpm@12.16.0+sha512.e9ccc91a0b8d52da297c16841f9ee05f3ddd631bd757ef26a211687d4a38de653c614453649294438c58be74c2ba62d53e633a4e153708c012296d0f3ee27b36"
 }

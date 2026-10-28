@@ -347,7 +347,9 @@ saying which model would genuinely help.
 
 ## Development
 
-Requires Node 22 or later and pnpm (the version is pinned in `package.json`).
+The package runs on Node 22 or later. Working on it needs the Node in `.nvmrc`
+(`nvm use`) and pnpm 12, pinned in `package.json`: run `corepack enable pnpm`.
+pnpm 12 needs Corepack 0.34.5 or later, which Node 24 ships and Node 22.21 does not.
 
 ```sh
 pnpm install
