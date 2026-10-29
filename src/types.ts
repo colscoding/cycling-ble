@@ -2,11 +2,11 @@
  * A single timestamped frame decoded from one BLE notification.
  *
  * A frame may carry more than one metric: an FTMS Indoor Bike Data packet
- * reports power and cadence together. Absent metrics are omitted keys, never
+ * can report power and cadence together. Absent metrics are omitted keys, never
  * `undefined` values — the package is built with `exactOptionalPropertyTypes`.
  */
 export interface SensorReading {
-    /** Unix timestamp in milliseconds. */
+    /** Local receipt time (or mock emission time) as a Unix timestamp in milliseconds. */
     timestamp: number;
     /** Instantaneous power in watts. */
     power?: number;
@@ -34,11 +34,17 @@ export interface SensorConnection {
     readonly deviceId?: string;
     /** Advertised device name, or a generic fallback. */
     readonly deviceName: string;
-    /** Subscribe to readings. Returns an unsubscribe function. */
+    /**
+     * Subscribe; the first listener may receive a buffered reading synchronously.
+     * Returns an unsubscribe function.
+     */
     addListener(listener: ReadingListener): () => void;
-    /** Subscribe to status changes. Returns an unsubscribe function. */
+    /**
+     * Subscribe to future status changes; the initial connection is not replayed.
+     * Returns an unsubscribe function.
+     */
     onStatusChange(listener: StatusListener): () => void;
-    /** Disconnect and stop reconnecting. */
+    /** Permanently disconnect this connection and stop reconnecting. Repeated calls are no-ops. */
     disconnect(): void;
 }
 
@@ -56,7 +62,10 @@ export interface Logger {
 
 /** Automatic reconnection tuning. */
 export interface ReconnectOptions {
-    /** Nonnegative safe integer or Infinity. Attempts before `failed`; default 5. */
+    /**
+     * Nonnegative safe integer or Infinity. Attempts after an unexpected drop;
+     * default 5. The library sets no per-attempt timeout.
+     */
     maxAttempts?: number;
     /** Integer ms in [0, 2147483647]; doubles each attempt. Default 1000. */
     baseDelayMs?: number;
@@ -87,16 +96,22 @@ export interface BluetoothAdapter {
 
 /** Options accepted by every connect function. */
 export interface ConnectOptions {
-    /** A previously returned `deviceId`, to reconnect without a chooser prompt. */
+    /**
+     * A previously returned deviceId; requires getDevices() and permission for
+     * the requested service. No chooser fallback.
+     */
     previousDeviceId?: string;
     /** Where the package logs. Defaults to a no-op logger. */
     logger?: Logger;
-    /** Reconnection tuning, or `false` to disable automatic reconnection. */
+    /**
+     * Retry tuning after an established connection drops; initial setup failures
+     * reject. `false` disables retries.
+     */
     reconnect?: ReconnectOptions | false;
     /**
      * Bluetooth implementation to use. Defaults to `navigator.bluetooth`.
-     * Override to supply a polyfill (such as the `webbluetooth` package on
-     * Node) or a fake in tests.
+     * Override to supply a compatible Web Bluetooth implementation on Node
+     * or a fake in tests. Node does not provide Bluetooth by default.
      */
     bluetooth?: BluetoothAdapter;
 }

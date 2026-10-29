@@ -5,10 +5,14 @@ FTMS smart trainers over Web Bluetooth. Zero runtime dependencies.
 
 **Two things to know before you install:**
 
-- **Chromium only.** Web Bluetooth ships in Chrome, Edge, and Opera, on
-  desktop and Android. Safari and Firefox do not implement it, and iOS does
-  not implement it in any browser. The page must be served over HTTPS or
-  from localhost.
+- **Browser and OS support vary.** Chrome supports Web Bluetooth on Android,
+  ChromeOS, macOS, and Windows. Linux support is experimental and requires a
+  browser flag. Safari and Firefox do not implement the API; do not assume
+  that an iOS browser supports it. Check the
+  [Web Bluetooth implementation status](https://github.com/whatwg/bluetooth/blob/main/implementation-status.md)
+  for your browser and OS. The page must use a secure context, such as HTTPS
+  or localhost; opening the device chooser requires a user gesture. See
+  [Chrome's security requirements](https://developer.chrome.com/docs/capabilities/bluetooth#security_requirements).
 - **Read-only.** This library subscribes to sensor notifications. It never
   writes to a GATT characteristic, so it **cannot control trainer
   resistance, ERG mode, or simulation grade.** If you need to control a
@@ -20,7 +24,12 @@ FTMS smart trainers over Web Bluetooth. Zero runtime dependencies.
 npm install cycling-ble
 ```
 
-The package is ESM. CommonJS code can `require()` it on Node 22.12 or later.
+The package is ESM and declares Node 22 or later for Node consumers. CommonJS
+code can `require()` it on Node 22.12 or later, where
+[loading ESM through `require()` is enabled by default](https://nodejs.org/en/blog/release/v22.12.0).
+Node does not supply `navigator.bluetooth`: use a compatible implementation
+through `options.bluetooth` to connect there. The parsers and mocks work in
+Node without Bluetooth. Browser applications can bundle the ESM entry points.
 
 ## Quick start
 
@@ -44,12 +53,12 @@ connection.disconnect();
 
 ### Readings carry more than one metric
 
-An FTMS trainer reports power and cadence in a single Bluetooth notification,
+An FTMS trainer can report power and cadence in a single Bluetooth notification,
 so a reading is a timestamped frame rather than a single number:
 
 ```ts
 interface SensorReading {
-    timestamp: number; // ms since epoch
+    timestamp: number; // local receipt time, ms since epoch
     power?: number; // watts
     cadence?: number; // rpm
     heartRate?: number; // bpm
@@ -65,12 +74,14 @@ than truthiness — `0 W` is a real reading.
 ### `connectPower(options?)`
 
 Connects to a power source. Prefers the Cycling Power Service (`0x1818`); if
-the device does not expose it, falls back to the Fitness Machine Service
-(`0x1826`). Cadence arrives alongside power in the same reading when the
-device reports it: an FTMS trainer directly, or a power meter through the
-crank revolution data in its measurements. A power meter's cadence is a
+that service or its measurement characteristic is missing, probes the Fitness
+Machine Service (`0x1826`). Permission, transport, and notification setup
+failures reject instead of triggering fallback. Readings include cadence when
+the device reports it: an FTMS trainer directly, or a power meter through the
+crank revolution data in its measurements. FTMS readings may contain power,
+cadence, or both. A power meter's cadence is a
 delta between crank samples, so it behaves like [`connectCadence`](#connectcadenceoptions):
-the first reading after connecting has no cadence.
+cadence needs two usable crank samples after connecting or reconnecting.
 
 ### `connectHeartRate(options?)`
 
@@ -89,8 +100,10 @@ seconds as zero.
 
 A sensor that instead advances its event time without reporting a new
 revolution has timed a window the rider did not pedal through, and that does
-yield a real `0`. Handle both: a `0` reading and a reading that stops arriving
-mean the same thing.
+yield a real `0`. Handle both explicit zero and stale cadence values. Track the
+time of the last **cadence** update: power readings may continue without a
+cadence field. Also track connection status so a lost connection is shown as
+unavailable rather than mistaken for stopped pedalling.
 
 ### `ConnectOptions`
 
@@ -112,10 +125,17 @@ after each failure, up to a ceiling:
 | `baseDelayMs` | `1000`  | Wait before the first attempt                   |
 | `maxDelayMs`  | `10000` | Ceiling on any single wait                      |
 
-With the defaults the waits are 1 s, 2 s, 4 s, 8 s, then 10 s — about 25
-seconds in total before `'failed'`. A successful reconnect restores the full
-budget for the next drop. For a long ride where giving up is never right, pass
-`maxAttempts: Infinity`.
+With the defaults the waits are 1 s, 2 s, 4 s, 8 s, then 10 s — 25 seconds
+of backoff if every attempt fails, **plus the time spent connecting and
+restoring notifications**. The library sets no timeout on those operations,
+so this is not a deadline for `'failed'`. A successful reconnect restores the
+full budget for the next drop. Pass `maxAttempts: Infinity` to keep retrying
+failed attempts without a count limit.
+
+Reconnection applies only after a connection has been returned. Initial
+chooser or setup failures reject the connect promise without automatic
+retries. With `reconnect: false`, clean up the old connection with
+`disconnect()`, then call a connect function again when you want a new one.
 
 `maxAttempts` must be a nonnegative safe integer or `Infinity`; `0` reports
 `failed` after a drop without attempting to reconnect. Both delays must be
@@ -133,6 +153,8 @@ than thrown, so pass a logger if readings seem to be missing.
 ### `SensorConnection`
 
 ```ts
+import type { ConnectionStatus, SensorReading } from 'cycling-ble';
+
 interface SensorConnection {
     readonly deviceId?: string;
     readonly deviceName: string;
@@ -142,16 +164,18 @@ interface SensorConnection {
 }
 ```
 
-Both subscribe methods return an unsubscribe function.
+Both subscribe methods return an unsubscribe function. `disconnect()` is
+final for that connection object and is safe to call more than once.
 
-Notifications can arrive while connection setup is still completing. The
-newest such reading is retained and delivered synchronously when the first
-`addListener` call attaches, so prepare your listener before subscribing. This
-is a single setup sample, not a replay of earlier readings. On reconnect, a
-setup sample is delivered to existing listeners after `connected`.
+Notifications can arrive while connection setup is still completing or before
+you subscribe. The newest reading received before the first `addListener`
+call is retained and delivered synchronously when that listener attaches, so
+prepare your listener before subscribing. Only that one reading is retained;
+later subscriptions do not replay past readings. On reconnect, a setup sample
+is delivered to existing listeners after `connected`.
 
 `ConnectionStatus` is `'connected' | 'disconnected' | 'reconnecting' | 'failed'`.
-Note that the initial connection is signalled by `connectPower()` resolving,
+Note that the initial connection is signalled by the connect promise resolving,
 not by a `'connected'` status event — that event fires before you can attach a
 listener. `onStatusChange` reports what happens _after_ that:
 
@@ -160,46 +184,50 @@ listener. `onStatusChange` reports what happens _after_ that:
 | Drop, then a successful retry | `disconnected` → `reconnecting` → `connected`                 |
 | Drop, and every retry fails   | `disconnected` → `reconnecting` (once per attempt) → `failed` |
 | Drop with `reconnect: false`  | `disconnected`                                                |
+| Drop with `maxAttempts: 0`    | `disconnected` → `failed`                                     |
 | You call `disconnect()`       | `disconnected`, and no reconnection follows                   |
 
 `'failed'` is final: that connection object will not try again. Call
 `disconnect()` on it to release the device, then connect afresh — with
 `previousDeviceId` if you kept it.
 
-Listeners run synchronously inside the Bluetooth event handler, so keep them
-quick. If a status listener calls `disconnect()`, its resulting status event is
-delivered after the current event has reached all listeners, preserving
-transition order. A listener that throws does not stop the others or disturb
+Listeners run synchronously when a reading or status is delivered, including
+from Bluetooth events, setup completion, and calls such as `disconnect()`.
+Keep them quick. If a status listener calls `disconnect()` on its own
+connection, its resulting status event is delivered after the current event
+has reached all listeners, preserving transition order. A listener that
+throws does not stop the others or disturb
 reconnection: its error is passed to `reportError`, which puts it in the
 console like any uncaught error and fires the window `error` event. Where
 there is no `reportError`, as in Node, it is rethrown on a later tick.
 
 ### Reconnecting without a chooser
 
-Persist `deviceId` and hand it back. The library never touches storage itself,
-so where you keep it is up to you:
+Persist `deviceId` and hand it back. Saved-device lookup depends on
+`navigator.bluetooth.getDevices()`, which the
+[implementation status](https://github.com/whatwg/bluetooth/blob/main/implementation-status.md#chrome)
+currently lists behind Chrome's experimental web platform features flag.
+Support for the chooser does not imply support for saved-device lookup.
+
+The library never touches storage itself. Here are separate entry points for
+a "Choose a sensor" button and an attempt to reuse a saved device:
 
 ```ts
 import { connectPower, type SensorConnection } from 'cycling-ble';
 
-const connection = await connectPower();
-if (connection.deviceId) {
-    localStorage.setItem('powerDeviceId', connection.deviceId);
+// Call from a user gesture, such as a "Choose a sensor" button click.
+async function chooseSensor(): Promise<SensorConnection> {
+    const connection = await connectPower();
+    if (connection.deviceId) {
+        localStorage.setItem('powerDeviceId', connection.deviceId);
+    }
+    return connection;
 }
 
-// Next session. Try the saved device first, and fall back to the chooser if
-// it is gone — connectPower rejects rather than prompting when it cannot
-// find it.
-async function connectRemembered(): Promise<SensorConnection> {
+// Next session. Returns null when no id is saved; lookup/setup errors reject.
+async function connectRemembered(): Promise<SensorConnection | null> {
     const saved = localStorage.getItem('powerDeviceId');
-    if (saved) {
-        try {
-            return await connectPower({ previousDeviceId: saved });
-        } catch {
-            localStorage.removeItem('powerDeviceId');
-        }
-    }
-    return connectPower();
+    return saved ? connectPower({ previousDeviceId: saved }) : null;
 }
 ```
 
@@ -211,14 +239,20 @@ rejection says which case it hit:
 - the device is no longer permitted — `classifyBluetoothError` reports
   `not-found`;
 - the browser does not support `getDevices()` at all — `classifyBluetoothError`
-  reports `unavailable` with `canRetry: false`, because retrying cannot help
-  and there is no point saving device ids;
+  reports `unavailable` with `canRetry: false`, because repeating the same
+  lookup cannot help while that API is unavailable;
 - the lookup itself failed — the original error is the rejection's `cause`.
 
-The chooser still needs a user gesture. A saved device that is switched off or
-out of range can take a while to fail, and by then the browser may no longer
-treat the click as recent enough to open a chooser. If the fallback is refused,
-show a "Choose a sensor" button rather than retrying automatically.
+Handle a rejected `connectRemembered()` call in your UI. If the saved device
+is no longer permitted, clear the stale id. Keep it on transient connection
+failures, such as a powered-off sensor. Offer the "Choose a sensor" button
+when lookup fails or no id is saved: waiting for a failed connection can
+consume the user activation needed to open a chooser automatically.
+
+The saved permission must also cover the requested sensor's GATT service. An
+id saved by `connectHeartRate`, for example, does not itself grant access to
+the Cycling Power Service on the same device; use the chooser to grant access
+to additional services.
 
 ### `classifyBluetoothError(error, options?)`
 
@@ -226,7 +260,7 @@ Browsers disagree on both the `name` and the wording of Web Bluetooth
 failures. This turns one into a stable category plus renderable copy:
 
 ```ts
-import { classifyBluetoothError } from 'cycling-ble';
+import { connectPower, classifyBluetoothError } from 'cycling-ble';
 
 try {
     await connectPower();
@@ -234,7 +268,7 @@ try {
     const { kind, title, message, suggestions, canRetry } = classifyBluetoothError(error, {
         sensorLabel: 'power meter',
     });
-    if (kind !== 'cancelled') showDialog(title, message, suggestions, canRetry);
+    if (kind !== 'cancelled') console.error(title, message, suggestions, { canRetry });
 }
 ```
 
@@ -257,19 +291,31 @@ makes them useful for decoding recorded captures:
 ```ts
 import { parseIndoorBikeData, parseCadenceMeasurement, initialCadenceState } from 'cycling-ble/parsers';
 
-const { powerW, cadenceRpm } = parseIndoorBikeData(dataView);
+// Example capture: More Data, instantaneous cadence, instantaneous power.
+const bikeData = new DataView(Uint8Array.of(0x45, 0, 180, 0, 250, 0).buffer);
+console.log(parseIndoorBikeData(bikeData)); // { powerW: 250, cadenceRpm: 90 }
 
 // The two cadence parsers are stateful: thread `state` through successive
 // calls, starting from initialCadenceState. That starting object is frozen
 // and shared, so reassign your variable — never write to it.
 let state = initialCadenceState;
-const result = parseCadenceMeasurement(dataView, state);
-state = result.state;
+for (const bytes of [
+    [0x02, 10, 0, 0, 4], // 10 revolutions at 1 second
+    [0x02, 11, 0, 0, 8], // 11 revolutions at 2 seconds
+]) {
+    const result = parseCadenceMeasurement(new DataView(Uint8Array.from(bytes).buffer), state);
+    state = result.state;
+    console.log(result.rpm); // null, then 60
+}
 ```
 
 Every parser throws a `RangeError` when a packet is shorter than its flags say
 it should be. The connect functions catch that and log it; if you call a parser
 directly, catch it yourself. Parsers never mutate the `state` they are given.
+
+Cadence is rounded to the nearest whole rpm. A rounded result of 300 rpm or
+more is treated as implausible and returned as `null`; the connection omits
+that metric. Power remains a signed watt value, including negative readings.
 
 ### `cycling-ble/mock`
 
@@ -277,36 +323,47 @@ Simulated sensors with the same shape as a real connection, for demos, UI work
 without hardware, and end-to-end tests:
 
 `createMockPowerSensor`, `createMockHeartRateSensor`, and
-`createMockCadenceSensor` each take `{ deviceName?, intervalMs?, autoStart? }`
-and generate plausible values on an interval until `disconnect()`.
+`createMockCadenceSensor` each take `{ deviceName?, intervalMs?, autoStart? }`.
+`intervalMs` defaults to `1000` and `autoStart` to `true`; the first generated
+reading arrives after one interval. Generated readings contain just the
+sensor's metric: 200–250 W, 140–160 bpm, or 80–100 rpm, respectively. Default
+names are `Mock Power Sensor`, `Mock Heart Rate Monitor`, and
+`Mock Cadence Sensor`. Mocks do not expose a `deviceId`.
 
 ```ts
 import { createMockPowerSensor } from 'cycling-ble/mock';
 
 const sensor = createMockPowerSensor({ intervalMs: 1000 });
 sensor.addListener((reading) => console.log(reading.power));
+// later
 sensor.disconnect();
 
 // Or drive it yourself, which is what you want in a test — no wall-clock wait.
 const manual = createMockPowerSensor({ autoStart: false });
+manual.addListener((reading) => console.log(reading.power));
 manual.emit({ power: 250 });
 
 // Walk a UI through a dropout without switching a sensor off.
 manual.simulateStatus('disconnected');
 manual.simulateStatus('reconnecting');
 manual.simulateStatus('connected');
+manual.disconnect();
 ```
 
-`simulateStatus` reports a status to `onStatusChange` listeners as a real
-connection would. Readings flow only while the simulated status is
-`'connected'`, so after `'disconnected'`, `'reconnecting'`, or `'failed'` the
+`simulateStatus` reports the supplied status to `onStatusChange` listeners;
+it does not schedule retries or subsequent transitions. Readings flow only
+while the simulated status is `'connected'`, so after `'disconnected'`,
+`'reconnecting'`, or `'failed'` the
 mock goes quiet — generated readings and `emit()` calls alike — until it is
-sent `'connected'` again. After `disconnect()` it is ignored.
+sent `'connected'` again. A simulated `'failed'` can therefore be reversed for
+testing, unlike a real connection's final failure. After `disconnect()`,
+`emit()` and `simulateStatus()` are ignored.
 
-Every listener receives each reading even if one throws. Unlike a real
-connection, a mock then rethrows the first error from `emit()` or
+Every listener receives each reading or status even if one throws. A mock
+then rethrows the first error from `emit()`, `simulateStatus()`, or
 `disconnect()`, so an assertion that fails inside a listener fails the test
-that called it.
+that called it. Avoid nested mock status changes inside a status listener;
+see [Known limitations](#known-limitations).
 
 ## Implemented services
 
@@ -317,20 +374,34 @@ that called it.
 | Cycling Speed and Cadence | `0x1816` | CSC Measurement           | `cadence`          |
 | Fitness Machine (FTMS)    | `0x1826` | Indoor Bike Data          | `power`, `cadence` |
 
-Only instantaneous power and cadence are decoded. Speed, distance,
-resistance, pedal balance, and torque are parsed past but not reported.
+The library reports power, cadence, and heart rate through the services above.
+The FTMS adapter reports only instantaneous power and cadence; its heart-rate
+field is skipped. Speed, distance, resistance, pedal balance, torque, and
+other unreported fields are checked for length but not exposed as readings.
 
 ## Known limitations
 
 - **One device, two connections.** A page has one GATT connection per physical
   device, so `connectPower` and `connectCadence` on the same device share it.
-  Calling `disconnect()` on one drops the link under the other, whose
-  automatic reconnection then brings it back. A power meter that reports
+  Calling `disconnect()` on one drops the link under the other, which normally
+  starts automatic reconnection if enabled. A power meter that reports
   crank data needs only `connectPower`, which already yields its cadence.
-- **FTMS Resistance Level width.** FTMS v1.0 gives this field as two bytes and
-  the later Bluetooth specification supplement gives one. The parser follows
-  FTMS v1.0. A trainer that follows the other reading _and_ reports resistance
-  would decode power incorrectly. No such trainer has been reported.
+- **A drop during reconnect status delivery can be lost.** If a `connected`
+  listener disconnects another subscription sharing the device, the first
+  subscription can stop receiving readings while still reporting `connected`
+  and never retry. Avoid changing another connection on the same device from
+  that callback; if this occurs, disconnect the affected subscription and
+  connect afresh.
+- **Nested mock statuses are not queued.** If a mock status listener calls
+  `disconnect()` during `simulateStatus('connected')`, later listeners receive
+  `disconnected` followed by `connected`, even though the mock has stopped.
+  Trigger the next mock transition after the current call returns.
+- **FTMS Resistance Level width.** The parser assumes a two-byte Resistance
+  Level field. The
+  [2026-09-09 GATT Specification Supplement, §3.139](https://btprodspecificationrefs.blob.core.windows.net/gatt-specification-supplement/GATT_Specification_Supplement.pdf#page=125)
+  defines it as one byte (`uint8`). A trainer using that one-byte layout with
+  resistance present can cause a malformed-packet rejection or incorrect
+  power decoding. The parser's layout has not been verified against hardware.
 
 ## Tested on
 
@@ -347,27 +418,44 @@ saying which model would genuinely help.
 
 ## Development
 
-The package runs on Node 22 or later. Working on it needs the Node in `.nvmrc`
-(`nvm use`) and pnpm 12, pinned in `package.json`: run `corepack enable pnpm`.
-pnpm 12 needs Corepack 0.34.5 or later, which Node 24 ships and Node 22.21 does not.
+For development, use the Node version in `.nvmrc` (currently 24.22.1) and the
+pnpm version pinned in `package.json` (currently 12.16.0). These are the versions
+used by the local checks, separate from the package's Node 22 runtime minimum.
 
 ```sh
-pnpm install
+nvm use
+corepack enable pnpm
+pnpm install --frozen-lockfile
 pnpm test               # run the suite
 pnpm run test:coverage  # run it with coverage, failing below the thresholds
 pnpm run build && pnpm run test:package # check the packed artifact in isolation
-pnpm run check          # types, lint, format, coverage, build, packed-package check
+pnpm run check          # types, lint, format, coverage, release-script tests, build, package check
 ```
+
+Corepack 0.36.0 was verified with this toolchain. If Corepack is missing or an
+older installation cannot launch pnpm, follow the
+[Corepack installation instructions](https://github.com/nodejs/corepack#how-to-install)
+and enable its pnpm shim. pnpm can also be installed through its
+[documented alternatives](https://pnpm.io/installation).
 
 Tests use Node's built-in runner. `test/helpers/fake-bluetooth.ts` fakes the
 small slice of Web Bluetooth the connect layer touches, so connection,
 reconnection, and teardown logic run without a browser or a sensor. Parser
-tests build packets byte by byte from the Bluetooth specifications.
+tests build packets byte by byte from the Bluetooth specifications. Coverage
+must reach 98% of lines, 95% of branches, and 90% of functions. The package
+check verifies ESM and CommonJS imports, declarations in an isolated consumer,
+and source-map targets. There are no browser or hardware integration tests
+or GitHub Actions workflows; run `pnpm run check` locally before submitting
+changes.
 
 ### Manual releases
 
-Update the version in `package.json` and the changelog, then commit the release
-changes. Set `NPM_TOKEN` in the ignored `.env` file at the repository root.
+Install development dependencies first. Update the version in `package.json`
+and the changelog, then commit the release changes. Set `NPM_TOKEN` in the
+ignored `.env` file at the repository root. Both dry-run and publish modes
+contact npm and require a valid token; neither accepts an already-published
+version. The script also invokes `git`, `tar`, `npm`, and `pnpm`, which must be
+available on `PATH`.
 
 ```sh
 pnpm run release:dry-run # validate the release without publishing
@@ -376,14 +464,19 @@ pnpm run release:verify  # resume verification if npm is still processing
 ```
 
 The release script requires a clean tracked working tree and runs the full
-check in a temporary export of the committed source. It packs and inspects that
-same source, reads `.env` as data, and authenticates through a temporary npm
-configuration. The token is redacted from command output and kept out of Git
+check in a temporary export of the committed source, using the local
+`node_modules` through a symlink. It packs and inspects that same source, reads
+`.env` as data, and authenticates through a temporary npm configuration.
+The token is redacted from command output and kept out of Git
 and the package. An already-published version is refused. Local releases do
 not include CI provenance. npm may take several minutes to process a new
-release. The script waits for the registry and saves a credential-free receipt
-in ignored `.releases/`; use `release:verify` to resume verification without
-submitting the version again.
+release. After `npm publish` succeeds, the script saves a credential-free
+receipt in ignored `.releases/` and checks the registry integrity. Verification
+allows up to 41 lookups separated by 15-second waits when the version is not
+yet visible. Use `release:verify` to resume without submitting again; it
+requires the receipt matching the version currently in `package.json` and
+does not require the token. If publication was interrupted before a receipt
+was written, inspect the registry before attempting another publication.
 
 Push the release commit and its matching `v*` tag to record the released source;
 tags do not trigger publication. GitHub workflows are currently removed.

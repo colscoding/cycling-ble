@@ -20,10 +20,11 @@ const FLAG_INST_CADENCE = 1 << 2;
 const FLAG_AVG_CADENCE = 1 << 3;
 const FLAG_TOTAL_DISTANCE = 1 << 4;
 /**
- * Resistance Level is skipped as 2 bytes (sint16), per FTMS v1.0. The later
- * GATT Specification Supplement lists it as uint8. The two cannot both be
- * right, and a trainer following the other reading would shift the power
- * field by one byte — unconfirmed against real hardware.
+ * This parser assumes a 2-byte Resistance Level. The 2026-09-09 GATT
+ * Specification Supplement, section 3.139, defines uint8 instead. A packet
+ * using that 1-byte layout may fail length validation or shift the power
+ * field by one byte. This parser's layout is unconfirmed against hardware.
+ * See https://www.bluetooth.com/specifications/gss/.
  */
 const FLAG_RESISTANCE = 1 << 5;
 const FLAG_INST_POWER = 1 << 6;

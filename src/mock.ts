@@ -15,7 +15,10 @@ export interface MockSensorOptions {
     deviceName?: string;
     /** How often to emit generated readings. Default 1000. */
     intervalMs?: number;
-    /** Begin emitting immediately. Default true; pass false to drive `emit`. */
+    /**
+     * Start the interval immediately; the first reading follows after intervalMs.
+     * Default true; pass false to drive emit() yourself.
+     */
     autoStart?: boolean;
 }
 
@@ -29,12 +32,16 @@ export interface MockSensorConnection extends SensorConnection {
     emit(fields: Omit<SensorReading, 'timestamp'>): void;
 
     /**
-     * Report a lifecycle status as a real connection would, to exercise UI
-     * states such as `reconnecting` and `failed` without hardware.
+     * Report a lifecycle status to exercise UI states without hardware.
+     * Does not schedule retries; even `failed` can be followed by `connected`.
      *
      * Readings flow only while the simulated status is `connected`: a real
      * link that is down delivers nothing, so generated readings and `emit()`
      * are dropped until then. Ignored after `disconnect()`.
+     *
+     * Nested status changes are delivered immediately, so later listeners can
+     * observe them out of order. Trigger the next transition after this call
+     * returns. Listener errors are rethrown after every listener has run.
      */
     simulateStatus(status: ConnectionStatus): void;
 }

@@ -45,7 +45,7 @@ interface ServiceCandidate {
 }
 
 interface SensorConfig {
-    /** Probed in order; the first service the device exposes wins. */
+    /** Probed in order; the first candidate with both service and characteristic wins. */
     candidates: ServiceCandidate[];
     defaultDeviceName: string;
     sensorName: string;
@@ -359,8 +359,10 @@ const cscCadenceParser = (): ValueParser => {
 /**
  * Connect to a power source: a Cycling Power meter, or an FTMS smart trainer.
  *
- * The Cycling Power Service is preferred when present. An FTMS trainer also
- * reports cadence, which arrives in the same reading as the power it came with.
+ * Cycling Power is preferred when its measurement characteristic is present;
+ * a missing service or characteristic permits fallback to FTMS. Permission,
+ * transport, and notification setup failures reject rather than fall back.
+ * Either service can provide cadence alongside power when the device reports it.
  */
 export function connectPower(options?: ConnectOptions): Promise<SensorConnection> {
     return connectSensor(

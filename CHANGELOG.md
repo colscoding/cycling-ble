@@ -6,6 +6,17 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation now clarifies browser and saved-device support, retry timing,
+  reading delivery, mock behavior, development setup, and release prerequisites.
+  Examples distinguish saved-device lookup from opening the chooser and use
+  complete parser packets.
+- Corrected the FTMS Resistance Level note: the parser assumes two bytes,
+  while the current GATT Specification Supplement defines a one-byte field.
+- Documented the existing reconnect-drop and nested mock-status limitations;
+  this documentation update does not change runtime behavior.
+
 ## [0.2.0] - 2026-10-27
 
 ### Fixed
