@@ -63,7 +63,7 @@ export async function waitForPublication(
     );
 }
 
-async function verifyPublication(version, integrity) {
+export async function verifyPublication(version, integrity) {
     await waitForPublication(
         async () => {
             const response = await fetch(`${registry}cycling-ble/${version}?release_check=${Date.now()}`, {

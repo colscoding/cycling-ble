@@ -17,6 +17,13 @@ All notable changes to this package are recorded here. The format follows
 - Documented the existing reconnect-drop and nested mock-status limitations;
   this documentation update does not change runtime behavior.
 
+### Added
+
+- A GitHub Actions release workflow, started by hand with a choice of
+  `patch`, `minor`, or `major`. It bumps the version and changelog, runs the
+  full check, pushes the release commit and tag, and publishes to npm through
+  trusted publishing with signed provenance, which local releases lack.
+
 ## [0.2.0] - 2026-10-27
 
 ### Fixed

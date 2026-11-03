@@ -444,11 +444,56 @@ reconnection, and teardown logic run without a browser or a sensor. Parser
 tests build packets byte by byte from the Bluetooth specifications. Coverage
 must reach 98% of lines, 95% of branches, and 90% of functions. The package
 check verifies ESM and CommonJS imports, declarations in an isolated consumer,
-and source-map targets. There are no browser or hardware integration tests
-or GitHub Actions workflows; run `pnpm run check` locally before submitting
-changes.
+and source-map targets. There are no browser or hardware integration tests,
+and no workflow checks pushes or pull requests; run `pnpm run check` locally
+before submitting changes.
 
-### Manual releases
+### Releases
+
+The **Release** GitHub Actions workflow (`.github/workflows/release.yml`)
+publishes new versions. It runs only when started by hand from `main`: open
+Actions → Release → Run workflow, choose the semver increment (`patch`,
+`minor`, or `major`), and optionally tick dry run. First record the changes
+under `## [Unreleased]` in `CHANGELOG.md`; the workflow refuses to release an
+empty section. It then:
+
+1. sets `version` in `package.json` and moves the unreleased entries under the
+   new version with today's date (UTC), updating the comparison links;
+2. refuses a version whose tag or npm release already exists;
+3. runs `pnpm run check` after a clean install, then packs and inspects the
+   tarball;
+4. commits `Release <version>`, tags `v<version>`, and pushes both atomically,
+   which fails if `main` moved during the run;
+5. publishes that same tarball through
+   [npm trusted publishing](https://docs.npmjs.com/trusted-publishers), with
+   signed provenance, waits until the registry serves its integrity, and
+   creates a GitHub release from the changelog section.
+
+A dry run performs steps 1–3, asks GitHub whether the push would be accepted,
+and stops without pushing or publishing. Either way, the run summary shows the
+version and its release notes.
+
+The job that publishes installs no dependencies, and only it can request the
+OIDC token that npm accepts, so the development toolchain never runs with
+publish rights. If publishing fails after the push, fix the cause and choose
+**Re-run failed jobs**. The re-run publishes the tarball that passed the
+checks, skips npm when the version is already there, and then creates the
+GitHub release.
+
+One-time setup: on npmjs.com, as the package owner, open the package's
+Settings → Trusted publishing, choose GitHub Actions, and enter user
+`colscoding`, repository `cycling-ble`, workflow `release.yml`, and environment
+`npm`. GitHub stores no npm token. Restricting the `npm` environment to `main`
+in the repository's Settings → Environments, or adding a required reviewer,
+adds a further gate before publication. Once a release has gone through the
+workflow, the package settings can require two-factor authentication and
+disallow tokens; that also retires the local fallback below.
+
+### Local releases (fallback)
+
+Prefer the workflow: local releases have no provenance, and pnpm consumers with
+`trustPolicy: no-downgrade` refuse a release with weaker trust evidence than
+earlier ones.
 
 Install development dependencies first. Update the version in `package.json`
 and the changelog, then commit the release changes. Set `NPM_TOKEN` in the
@@ -468,10 +513,10 @@ check in a temporary export of the committed source, using the local
 `node_modules` through a symlink. It packs and inspects that same source, reads
 `.env` as data, and authenticates through a temporary npm configuration.
 The token is redacted from command output and kept out of Git
-and the package. An already-published version is refused. Local releases do
-not include CI provenance. npm may take several minutes to process a new
-release. After `npm publish` succeeds, the script saves a credential-free
-receipt in ignored `.releases/` and checks the registry integrity. Verification
+and the package. An already-published version is refused. npm may take several
+minutes to process a new release. After `npm publish` succeeds, the script
+saves a credential-free receipt in ignored `.releases/` and checks the registry
+integrity. Verification
 allows up to 41 lookups separated by 15-second waits when the version is not
 yet visible. Use `release:verify` to resume without submitting again; it
 requires the receipt matching the version currently in `package.json` and
@@ -479,7 +524,7 @@ does not require the token. If publication was interrupted before a receipt
 was written, inspect the registry before attempting another publication.
 
 Push the release commit and its matching `v*` tag to record the released source;
-tags do not trigger publication. GitHub workflows are currently removed.
+tags do not trigger publication.
 
 ## License
 
