@@ -419,7 +419,7 @@ saying which model would genuinely help.
 ## Development
 
 For development, use the Node version in `.nvmrc` (currently 24.22.2) and the
-pnpm version pinned in `package.json` (currently 12.17.0). These are the versions
+pnpm version pinned in `package.json` (currently 12.21.0). These are the versions
 used by the local checks, separate from the package's Node 22 runtime minimum.
 
 ```sh
