@@ -52,7 +52,7 @@
     "scripts": {
         "build": "tsc -p tsconfig.build.json",
         "typecheck": "tsc --noEmit",
-        "lint": "eslint src test",
+        "lint": "oxlint src test",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "tsx --test \"test/**/*.test.ts\"",
@@ -66,14 +66,12 @@
         "prepublishOnly": "pnpm run check"
     },
     "devDependencies": {
-        "@eslint/js": "^10.0.1",
         "@types/node": "^24.19.2",
         "@types/web-bluetooth": "^0.0.22",
-        "eslint": "^10.15.0",
+        "oxlint": "^1.93.0",
         "prettier": "^3.10.1",
         "tsx": "^4.23.15",
-        "typescript": "~6.0.3",
-        "typescript-eslint": "^8.72.2"
+        "typescript": "~6.0.3"
     },
     "packageManager": "pnpm@12.21.0+sha512.66fd8278ee28935ce951792d34367ff3af5c432a2756445823029533835b8da529bbe0be5130afd56ed0713fb8789e47bad82d93bd5ae2fe54b15562d6276ef0"
 }
