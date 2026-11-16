@@ -6,6 +6,8 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-16
+
 ### Changed
 
 - Documentation now clarifies browser and saved-device support, retry timing,
@@ -165,7 +167,8 @@ All notable changes to this package are recorded here. The format follows
 
 First release.
 
-[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/colscoding/cycling-ble/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/colscoding/cycling-ble/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/colscoding/cycling-ble/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/colscoding/cycling-ble/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/colscoding/cycling-ble/compare/v0.1.2...v0.1.3
