@@ -27,6 +27,9 @@ describe('classifyBluetoothError', () => {
         assert.equal(info.kind, 'cancelled');
         assert.equal(info.canRetry, true);
         assert.deepEqual(info.suggestions, []);
+        assert.equal(classifyBluetoothError(new Error('User canceled the requestDevice() chooser.')).kind, 'cancelled');
+        assert.equal(classifyBluetoothError(new Error('Dialog canceled')).kind, 'cancelled');
+        assert.equal(classifyBluetoothError(new Error('Chooser canceled')).kind, 'cancelled');
     });
 
     it('recognises an unavailable adapter', () => {
@@ -107,6 +110,12 @@ describe('classifyBluetoothError', () => {
             assert.equal(info.kind, 'unavailable');
         });
 
+        it('is not-found when the message reports no Bluetooth devices', () => {
+            const info = classifyBluetoothError(named('NotFoundError', 'No Bluetooth devices found'));
+            assert.equal(info.kind, 'not-found');
+            assert.equal(info.canRetry, true);
+        });
+
         it('is nothing found otherwise', () => {
             const info = classifyBluetoothError(named('NotFoundError', 'Nothing matched the filters'));
             assert.equal(info.kind, 'not-found');
@@ -182,14 +191,31 @@ describe('classifyBluetoothError', () => {
         assert.equal(info.kind, 'cancelled');
     });
 
-    it('treats null and objects without string name or message as unknown', () => {
+    it('treats null, null-prototype, and non-stringifiable objects safely', () => {
         assert.equal(classifyBluetoothError(null).kind, 'unknown');
         assert.equal(classifyBluetoothError({ code: 42 }).kind, 'unknown');
         assert.equal(classifyBluetoothError({ name: 7, message: ['GATT'] }).kind, 'unknown');
+        assert.equal(classifyBluetoothError(Object.create(null)).kind, 'unknown');
+        assert.equal(
+            classifyBluetoothError(Object.assign(Object.create(null), { name: 'NotFoundError' })).kind,
+            'not-found'
+        );
+        assert.equal(
+            classifyBluetoothError({
+                toString() {
+                    throw new Error('unconvertible');
+                },
+            }).kind,
+            'unknown'
+        );
     });
 
     it('classifies by name alone when the message is unhelpful', () => {
         assert.equal(classifyBluetoothError(named('SecurityError', '')).kind, 'permission-denied');
+        assert.equal(
+            classifyBluetoothError(named('NotAllowedError', 'Web Bluetooth API globally disabled.')).kind,
+            'permission-denied'
+        );
         assert.equal(classifyBluetoothError(named('NetworkError', '')).kind, 'timeout');
     });
 

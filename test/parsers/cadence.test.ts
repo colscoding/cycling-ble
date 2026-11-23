@@ -114,6 +114,21 @@ describe('parseCadenceMeasurement', () => {
         assert.deepEqual(state, { lastCrankRevs: 10, lastCrankTime: 1024 });
     });
 
+    it('rounds exact half-rpm deltas upward without intermediate float loss', () => {
+        const start = parseCadenceMeasurement(crankView(0, 0), initialCadenceState);
+        // 41 revolutions in 40 s (40960 / 1024) is exactly 61.5 rpm.
+        assert.equal(parseCadenceMeasurement(crankView(41, 40960), start.state).rpm, 62);
+        // 49 revolutions in 24 s (24576 / 1024) is exactly 122.5 rpm.
+        assert.equal(parseCadenceMeasurement(crankView(49, 24576), start.state).rpm, 123);
+    });
+
+    it('decodes from a DataView subview with a non-zero byteOffset', () => {
+        const buffer = Uint8Array.from([0xff, 0x02, 10, 0, 0, 4, 0x02, 11, 0, 0, 8, 0xff]).buffer;
+        const first = parseCadenceMeasurement(new DataView(buffer, 1, 5), initialCadenceState);
+        const second = parseCadenceMeasurement(new DataView(buffer, 6, 5), first.state);
+        assert.equal(second.rpm, 60);
+    });
+
     it('returns null but still advances state when time does not move', () => {
         const first = parseCadenceMeasurement(crankView(10, 1024), initialCadenceState);
         const second = parseCadenceMeasurement(crankView(11, 1024), first.state);

@@ -6,6 +6,28 @@ All notable changes to this package are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A link drop that occurs while delivering a reconnect's `'connected'` status
+  (or flushing a setup reading) is no longer lost: once every subscriber has
+  seen `'connected'`, the connection reports `'disconnected'` and retries as
+  normal. Re-entrant disconnect events during `'disconnected'` delivery and
+  drops during setup where a peer reopens the GATT link are handled safely too.
+- Cancelling reconnection mid-attempt logs cancellation instead of falsely
+  logging a successful reconnect or a reconnection failure.
+- Mock sensors queue nested status changes triggered from status listeners so
+  every listener receives transitions in order, matching real connections, and
+  validate `intervalMs` against the supported timer range (`RangeError`).
+- `classifyBluetoothError` classifies a `NotFoundError` mentioning
+  `"No Bluetooth devices"` as `not-found` (retryable) instead of `unavailable`,
+  recognises `NotAllowedError` as `permission-denied` and US `"canceled"`
+  wording, and no longer throws on null-prototype or non-stringifiable values.
+- Cadence delta rounding in `parseCadenceMeasurement` and `parsePowerCadence`
+  multiplies before dividing so exact half-rpm deltas round consistently upward
+  instead of losing half an rpm to intermediate floating-point rounding.
+- The local release script normalises single-version `npm view ... versions`
+  output before checking whether a version is already published.
+
 ## [0.2.1] - 2026-11-16
 
 ### Changed

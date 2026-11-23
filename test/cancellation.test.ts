@@ -134,4 +134,48 @@ describe('cancelling asynchronous setup', () => {
         assert.equal(fake.char.listenerCount, 0);
         assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
     });
+
+    it('fails setup if the link drops and another connection reopens GATT before startNotifications resolves', async () => {
+        const fake = setup();
+        const held = gate();
+        let subscribing = false;
+        fake.char.startNotifications = async () => {
+            subscribing = true;
+            await held.promise;
+            return fake.char;
+        };
+        const pending = connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 1 } });
+        await waitFor(() => subscribing);
+        fake.device.dropConnection();
+        // Another connection sharing the device brings GATT back up while our
+        // characteristic listener has already been detached by the drop.
+        fake.device.gatt.connected = true;
+        const rejected = assert.rejects(pending, /GATT server disconnected during setup/);
+        held.release();
+        await rejected;
+        assert.equal(fake.char.listenerCount, 0);
+        assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
+    });
+
+    it('rejects initial setup if a drop fires between startNotifications resolving and connect returning', async () => {
+        const fake = setup();
+        const start = fake.char.startNotifications.bind(fake.char);
+        let dropped = false;
+        fake.char.startNotifications = () => {
+            const result = start();
+            if (!dropped) {
+                dropped = true;
+                // Enqueue dropConnection() between connect() setting ready=true
+                // and connectSensor() resuming after `await connect()`.
+                void result.then(() => queueMicrotask(() => fake.device.dropConnection()));
+            }
+            return result;
+        };
+        await assert.rejects(
+            () => connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 1 } }),
+            /GATT server disconnected during setup/
+        );
+        assert.equal(fake.char.listenerCount, 0);
+        assert.equal(fake.device.listenerCountFor('gattserverdisconnected'), 0);
+    });
 });

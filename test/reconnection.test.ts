@@ -189,16 +189,103 @@ describe('createReconnectionManager', () => {
         }
     });
 
-    it('stops retrying when cancelled while a failing attempt is in flight', async () => {
-        const m = make({ maxAttempts: 5, baseDelayMs: 1 });
-        let calls = 0;
-        await m.handleDisconnect(async () => {
-            calls++;
-            m.markManualDisconnect();
+    it('logs cancellation rather than success when cancelled while an attempt resolves', async () => {
+        const { logger, calls } = recordingLogger();
+        manager = createReconnectionManager({
+            sensorName: 'Test Sensor',
+            options: { maxAttempts: 3, baseDelayMs: 1 },
+            logger,
+            onStatusChange: (status) => statuses.push(status),
+        });
+        await manager.handleDisconnect(async () => {
+            manager.markManualDisconnect();
+        });
+        assert.ok(calls.info.some((message) => message.includes('reconnection cancelled')));
+        assert.equal(
+            calls.info.some((message) => message.includes('reconnected')),
+            false
+        );
+    });
+
+    it('stops retrying and logs cancellation when cancelled while a failing attempt is in flight', async () => {
+        const { logger, calls } = recordingLogger();
+        manager = createReconnectionManager({
+            sensorName: 'Test Sensor',
+            options: { maxAttempts: 5, baseDelayMs: 1 },
+            logger,
+            onStatusChange: (status) => statuses.push(status),
+        });
+        let callsCount = 0;
+        await manager.handleDisconnect(async () => {
+            callsCount++;
+            manager.markManualDisconnect();
             throw new Error('failed after the caller gave up');
         });
-        assert.equal(calls, 1, 'no further attempt once cancelled');
+        assert.equal(callsCount, 1, 'no further attempt once cancelled');
         assert.deepEqual(statuses, ['disconnected', 'reconnecting'], 'and no failure announced for a cancelled cycle');
+        assert.ok(calls.info.some((message) => message.includes('reconnection cancelled')));
+        assert.equal(calls.error.length, 0);
+    });
+
+    it('ignores a re-entrant handleDisconnect triggered during disconnected status delivery', async () => {
+        let calls = 0;
+        const connectFn = async (): Promise<void> => {
+            calls++;
+        };
+        manager = createReconnectionManager({
+            sensorName: 'Test Sensor',
+            options: { maxAttempts: 3, baseDelayMs: 5 },
+            onStatusChange: (status) => {
+                statuses.push(status);
+                if (status === 'disconnected') void manager.handleDisconnect(connectFn);
+            },
+        });
+        await manager.handleDisconnect(connectFn);
+        assert.equal(calls, 1);
+        assert.deepEqual(statuses, ['disconnected', 'reconnecting']);
+    });
+
+    it('remains usable if a disconnected status callback throws synchronously', async () => {
+        let shouldThrow = true;
+        manager = createReconnectionManager({
+            sensorName: 'Test Sensor',
+            options: { maxAttempts: 2, baseDelayMs: 1 },
+            onStatusChange: (status) => {
+                statuses.push(status);
+                if (status === 'disconnected' && shouldThrow) {
+                    shouldThrow = false;
+                    throw new Error('callback bug');
+                }
+            },
+        });
+        assert.throws(() => void manager.handleDisconnect(async () => {}), /callback bug/);
+        let calls = 0;
+        await manager.handleDisconnect(async () => {
+            calls++;
+        });
+        assert.equal(calls, 1);
+        assert.deepEqual(statuses, ['disconnected', 'disconnected', 'reconnecting']);
+    });
+
+    it('keeps a replacement cycle intact when reset() and a new drop happen during connectFn', async () => {
+        let calls = 0;
+        let nestedCycle: Promise<void> | undefined;
+        manager = createReconnectionManager({
+            sensorName: 'Test Sensor',
+            options: { maxAttempts: 1, baseDelayMs: 2 },
+            onStatusChange: (status) => statuses.push(status),
+        });
+        const connectFn = async (): Promise<void> => {
+            calls++;
+            if (calls === 1) {
+                manager.reset();
+                nestedCycle = manager.handleDisconnect(connectFn);
+            }
+        };
+        await manager.handleDisconnect(connectFn);
+        await nestedCycle;
+        assert.equal(calls, 2);
+        assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'disconnected', 'reconnecting']);
     });
 
     it('reset clears the manual flag', async () => {
@@ -316,13 +403,16 @@ describe('createReconnectionManager', () => {
         assert.equal(calls, 1);
     });
 
-    it('never reconnects when reconnection is disabled', async () => {
+    it('never reconnects when reconnection is disabled and ignores duplicate drops', async () => {
         const m = make(false);
         let calls = 0;
         await m.handleDisconnect(async () => {
             calls++;
         });
+        await m.handleDisconnect(async () => {
+            calls++;
+        });
         assert.equal(calls, 0);
-        assert.deepEqual(statuses, ['disconnected'], 'still reports the disconnect');
+        assert.deepEqual(statuses, ['disconnected'], 'still reports the disconnect once');
     });
 });

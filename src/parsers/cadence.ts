@@ -103,7 +103,9 @@ export function crankCadence(crankRevs: number, crankTime: number, state: Cadenc
 
     // Both deltas are corrected to non-negative above and timeDelta is known
     // positive, so rpm cannot come out negative — only implausibly large.
-    const rpm = Math.round((revDelta / (timeDelta / CRANK_TIME_RESOLUTION)) * 60);
+    // Multiply before dividing: revDelta * 1024 * 60 is exact for any uint16
+    // delta (at most ~4e9), avoiding intermediate rounding on exact half-rpms.
+    const rpm = Math.round((revDelta * CRANK_TIME_RESOLUTION * 60) / timeDelta);
     if (rpm >= MAX_CADENCE_RPM) {
         return { rpm: null, state: newState };
     }

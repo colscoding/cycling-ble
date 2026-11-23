@@ -101,6 +101,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     const statusListeners = createListeners<ConnectionStatus>();
 
     let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+    let attachedAttempt: symbol | null = null;
     let parseValue: ValueParser = () => null;
     let ready = false;
     let hasReadingListener = false;
@@ -121,6 +122,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     // used to register as a failed attempt, and retried forever.
     const pendingStatuses: ConnectionStatus[] = [];
     let notifyingStatus = false;
+    let deferredDisconnect = false;
     const notifyStatus = (status: ConnectionStatus): void => {
         // A listener can disconnect during delivery. Finish the current event
         // for every subscriber before delivering that nested transition, so
@@ -136,6 +138,15 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             }
         } finally {
             notifyingStatus = false;
+        }
+        // A drop that fired during status delivery (for instance, a 'connected'
+        // listener disconnecting another subscription on the same device) runs
+        // once every subscriber has finished seeing the current status.
+        if (deferredDisconnect) {
+            deferredDisconnect = false;
+            if (!reconnection.isManualDisconnect()) {
+                void reconnection.handleDisconnect(connect);
+            }
         }
     };
 
@@ -188,6 +199,7 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     const detach = (): void => {
         ready = false;
         pendingReading = null;
+        attachedAttempt = null;
         characteristic?.removeEventListener('characteristicvaluechanged', handleValueChanged);
     };
 
@@ -245,10 +257,13 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
             // A sensor can notify before startNotifications() resolves. Listen
             // first, but hold delivery until setup is confirmed to have succeeded.
             characteristic.addEventListener('characteristicvaluechanged', handleValueChanged);
+            attachedAttempt = attempt;
 
             await characteristic.startNotifications();
             if (abandoned()) return;
-            if (!gatt.connected) throw new Error('GATT server disconnected during setup');
+            if (!gatt.connected || attachedAttempt !== attempt) {
+                throw new Error('GATT server disconnected during setup');
+            }
 
             ready = true;
             reconnection.reset();
@@ -267,18 +282,24 @@ async function connectSensor(config: SensorConfig, options: ConnectOptions = {})
     const handleGattDisconnect = (): void => {
         detach();
         if (initialized && !reconnection.isManualDisconnect()) {
-            void reconnection.handleDisconnect(connect);
+            if (notifyingStatus) {
+                deferredDisconnect = true;
+            } else {
+                void reconnection.handleDisconnect(connect);
+            }
         }
     };
     device.addEventListener('gattserverdisconnected', handleGattDisconnect);
 
     try {
         await connect();
+        if (!ready) throw new Error('GATT server disconnected during setup');
         initialized = true;
     } catch (error) {
         // The caller never receives a connection here, so nothing else can ever
         // clean this up. Left in place, the device listener would start a
         // reconnect loop on the next drop that no one holds a handle to.
+        detach();
         device.removeEventListener('gattserverdisconnected', handleGattDisconnect);
         reconnection.markManualDisconnect();
         throw error;

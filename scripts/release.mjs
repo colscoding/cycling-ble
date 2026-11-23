@@ -122,9 +122,10 @@ async function release(mode) {
         throw new Error('Credential files must not be tracked in Git');
     }
     const commit = run('git', ['rev-parse', 'HEAD'], { quiet: true }).trim();
-    const versions = JSON.parse(
+    const rawVersions = JSON.parse(
         run('npm', ['view', 'cycling-ble', 'versions', '--json', `--registry=${registry}`], { quiet: true })
     );
+    const versions = Array.isArray(rawVersions) ? rawVersions : [rawVersions];
     if (versions.includes(version)) throw new Error(`cycling-ble@${version} is already published`);
 
     const directory = mkdtempSync(join(tmpdir(), 'cycling-ble-release-'));

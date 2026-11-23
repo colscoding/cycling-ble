@@ -86,18 +86,77 @@ assert.equal(require('cycling-ble/package.json').name, 'cycling-ble');
         writeFileSync(
             join(consumer, 'consumer.ts'),
             `
-import { connectPower, type BluetoothAdapter, type SensorConnection } from 'cycling-ble';
-import { parseIndoorBikeData, parseCadenceMeasurement, initialCadenceState } from 'cycling-ble/parsers';
-import { createMockPowerSensor, type MockSensorConnection } from 'cycling-ble/mock';
+import {
+    connectPower,
+    connectHeartRate,
+    connectCadence,
+    classifyBluetoothError,
+    type BluetoothAdapter,
+    type BluetoothErrorInfo,
+    type BluetoothErrorKind,
+    type ClassifyOptions,
+    type ConnectOptions,
+    type ConnectionStatus,
+    type Logger,
+    type ReadingListener,
+    type ReconnectOptions,
+    type SensorConnection,
+    type SensorReading,
+    type StatusListener,
+} from 'cycling-ble';
+import {
+    parsePowerMeasurement,
+    parsePowerCadence,
+    parseHeartRateMeasurement,
+    parseCadenceMeasurement,
+    parseIndoorBikeData,
+    initialCadenceState,
+    type CadenceParseResult,
+    type CadenceState,
+    type IndoorBikeParseResult,
+} from 'cycling-ble/parsers';
+import {
+    createMockPowerSensor,
+    createMockHeartRateSensor,
+    createMockCadenceSensor,
+    type MockSensorConnection,
+    type MockSensorOptions,
+} from 'cycling-ble/mock';
+
+const logger: Logger = console;
+const reconnect: ReconnectOptions = { maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 5000 };
 const bluetooth: BluetoothAdapter = { requestDevice: async () => ({}) };
-const connection: Promise<SensorConnection> = connectPower({ bluetooth });
-const mock: MockSensorConnection = createMockPowerSensor({ autoStart: false });
-mock.emit({ power: 250 });
-mock.simulateStatus('reconnecting');
-void connection;
-void parseIndoorBikeData;
-void parseCadenceMeasurement;
-void initialCadenceState;
+const options: ConnectOptions = { bluetooth, logger, reconnect };
+const connections: Promise<SensorConnection>[] = [
+    connectPower(options),
+    connectHeartRate(options),
+    connectCadence(options),
+];
+const classifyOptions: ClassifyOptions = { sensorLabel: 'power meter' };
+const errorInfo: BluetoothErrorInfo = classifyBluetoothError(new Error('GATT failed'), classifyOptions);
+const kind: BluetoothErrorKind = errorInfo.kind;
+const readingListener: ReadingListener = (reading: SensorReading) => void reading.timestamp;
+const statusListener: StatusListener = (status: ConnectionStatus) => void status;
+
+const view = new DataView(new ArrayBuffer(8));
+const power: number = parsePowerMeasurement(view);
+const powerCadence: CadenceParseResult = parsePowerCadence(view, initialCadenceState);
+const heartRate: number = parseHeartRateMeasurement(view);
+const cadenceState: CadenceState = parseCadenceMeasurement(view, initialCadenceState).state;
+const bikeData: IndoorBikeParseResult = parseIndoorBikeData(view);
+
+const mockOptions: MockSensorOptions = { deviceName: 'Test', intervalMs: 1000, autoStart: false };
+const mocks: MockSensorConnection[] = [
+    createMockPowerSensor(mockOptions),
+    createMockHeartRateSensor(mockOptions),
+    createMockCadenceSensor(mockOptions),
+];
+mocks[0]!.addListener(readingListener);
+mocks[0]!.onStatusChange(statusListener);
+mocks[0]!.emit({ power: 250 });
+mocks[0]!.simulateStatus('reconnecting');
+
+void [connections, kind, power, powerCadence, heartRate, cadenceState, bikeData];
 `
         );
         writeFileSync(

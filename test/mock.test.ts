@@ -160,6 +160,19 @@ describe('mock sensors', () => {
         assert.equal(sensor.deviceName, 'My Fake Meter');
         sensor.disconnect();
     });
+
+    it('rejects invalid intervalMs values with RangeError', () => {
+        for (const intervalMs of [NaN, -1, Infinity, -Infinity, 2 ** 31]) {
+            assert.throws(() => createMockPowerSensor({ intervalMs, autoStart: false }), {
+                name: 'RangeError',
+                message: /intervalMs/,
+            });
+        }
+        const zero = createMockPowerSensor({ intervalMs: 0, autoStart: false });
+        const max = createMockPowerSensor({ intervalMs: 2147483647, autoStart: false });
+        zero.disconnect();
+        max.disconnect();
+    });
 });
 
 describe('mock sensor simulated status changes', () => {
@@ -223,6 +236,46 @@ describe('mock sensor simulated status changes', () => {
         sensor.emit({ power: 200 });
         assert.deepEqual(statuses, ['disconnected']);
         assert.equal(readings.length, 0);
+    });
+
+    it('queues nested disconnect() from a status listener so every listener sees transitions in order', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const first: ConnectionStatus[] = [];
+        const second: ConnectionStatus[] = [];
+        sensor.onStatusChange((status) => {
+            first.push(status);
+            if (status === 'connected') sensor.disconnect();
+        });
+        sensor.onStatusChange((status) => second.push(status));
+
+        sensor.simulateStatus('connected');
+        assert.deepEqual(first, ['connected', 'disconnected']);
+        assert.deepEqual(second, ['connected', 'disconnected']);
+
+        const readings: SensorReading[] = [];
+        sensor.addListener((reading) => readings.push(reading));
+        sensor.emit({ power: 250 });
+        assert.equal(readings.length, 0, 'mock is stopped');
+    });
+
+    it('queues nested simulateStatus() transitions in order and rethrows the first error', () => {
+        const sensor = createMockPowerSensor({ autoStart: false });
+        const first: ConnectionStatus[] = [];
+        const second: ConnectionStatus[] = [];
+        const off = sensor.onStatusChange((status) => {
+            first.push(status);
+            if (status === 'disconnected') {
+                sensor.simulateStatus('reconnecting');
+                throw new Error('listener failed after nested transition');
+            }
+        });
+        sensor.onStatusChange((status) => second.push(status));
+
+        assert.throws(() => sensor.simulateStatus('disconnected'), /listener failed after nested transition/);
+        assert.deepEqual(first, ['disconnected', 'reconnecting']);
+        assert.deepEqual(second, ['disconnected', 'reconnecting']);
+        off();
+        sensor.disconnect();
     });
 });
 

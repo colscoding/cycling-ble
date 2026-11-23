@@ -130,6 +130,9 @@ describe('parseIndoorBikeData', () => {
         const justUnder = ftmsView(MORE_DATA | INST_CADENCE, [{ size: 2, value: 598 }]); // 299 rpm
         assert.equal(parseIndoorBikeData(justUnder).cadenceRpm, 299);
 
+        const roundsToCeiling = ftmsView(MORE_DATA | INST_CADENCE, [{ size: 2, value: 599 }]); // 299.5 -> 300 rpm
+        assert.equal(parseIndoorBikeData(roundsToCeiling).cadenceRpm, null);
+
         const atCeiling = ftmsView(MORE_DATA | INST_CADENCE, [{ size: 2, value: 600 }]); // 300 rpm
         assert.equal(parseIndoorBikeData(atCeiling).cadenceRpm, null);
     });

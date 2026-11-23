@@ -9,11 +9,13 @@ import type { ConnectionStatus, ReadingListener, SensorConnection, SensorReading
 import { createListeners } from './listeners.js';
 
 const DEFAULT_INTERVAL_MS = 1000;
+// Longer delays overflow the timer range in browsers and Node.
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
 export interface MockSensorOptions {
     /** Reported as `deviceName`. */
     deviceName?: string;
-    /** How often to emit generated readings. Default 1000. */
+    /** Finite ms in [0, 2147483647] between generated readings. Default 1000. */
     intervalMs?: number;
     /**
      * Start the interval immediately; the first reading follows after intervalMs.
@@ -39,9 +41,9 @@ export interface MockSensorConnection extends SensorConnection {
      * link that is down delivers nothing, so generated readings and `emit()`
      * are dropped until then. Ignored after `disconnect()`.
      *
-     * Nested status changes are delivered immediately, so later listeners can
-     * observe them out of order. Trigger the next transition after this call
-     * returns. Listener errors are rethrown after every listener has run.
+     * Nested status changes are queued so every listener sees transitions in
+     * order, matching a real connection. Listener errors are rethrown after
+     * every queued transition has run.
      */
     simulateStatus(status: ConnectionStatus): void;
 }
@@ -52,6 +54,10 @@ function createMockSensor(
     options: MockSensorOptions = {}
 ): MockSensorConnection {
     const { deviceName = defaultName, intervalMs = DEFAULT_INTERVAL_MS, autoStart = true } = options;
+
+    if (!Number.isFinite(intervalMs) || intervalMs < 0 || intervalMs > MAX_TIMER_DELAY_MS) {
+        throw new RangeError(`intervalMs must be a finite number between 0 and ${MAX_TIMER_DELAY_MS}`);
+    }
 
     const readingListeners = createListeners<SensorReading>();
     const statusListeners = createListeners<ConnectionStatus>();
@@ -67,8 +73,25 @@ function createMockSensor(
         if (errors.length > 0) throw errors[0];
     };
 
+    const pendingStatuses: ConnectionStatus[] = [];
+    let notifyingStatus = false;
     const notifyStatus = (status: ConnectionStatus): void => {
-        throwFirst(statusListeners.emit(status));
+        // Match real connections: finish delivering the current status to every
+        // subscriber before running any nested transition a listener triggered.
+        pendingStatuses.push(status);
+        if (notifyingStatus) return;
+
+        notifyingStatus = true;
+        const errors: unknown[] = [];
+        try {
+            let next: ConnectionStatus | undefined;
+            while ((next = pendingStatuses.shift()) !== undefined) {
+                errors.push(...statusListeners.emit(next));
+            }
+        } finally {
+            notifyingStatus = false;
+        }
+        throwFirst(errors);
     };
 
     const emit = (fields: Omit<SensorReading, 'timestamp'>): void => {

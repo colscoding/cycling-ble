@@ -913,6 +913,174 @@ describe('connection lifecycle', () => {
         }
     }
 
+    it('recovers when a connected listener drops a shared device during reconnect', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
+        const char = fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT);
+        const first: ConnectionStatus[] = [];
+        const second: ConnectionStatus[] = [];
+        let droppedOnce = false;
+        try {
+            conn.onStatusChange((status) => {
+                first.push(status);
+                if (status === 'connected' && !droppedOnce) {
+                    droppedOnce = true;
+                    fake.device.dropConnection();
+                }
+            });
+            conn.onStatusChange((status) => second.push(status));
+
+            fake.device.dropConnection();
+            await waitFor(
+                () => second.filter((status) => status === 'connected').length === 2,
+                1000,
+                'second reconnect'
+            );
+
+            const expected: ConnectionStatus[] = [
+                'disconnected',
+                'reconnecting',
+                'connected',
+                'disconnected',
+                'reconnecting',
+                'connected',
+            ];
+            assert.deepEqual(first, expected);
+            assert.deepEqual(second, expected);
+            assert.equal(fake.device.gatt.connected, true);
+            assert.equal(char.listenerCount, 1);
+
+            const readings: SensorReading[] = [];
+            conn.addListener((reading) => readings.push(reading));
+            char.emit(powerPacket(275));
+            assert.deepEqual(
+                readings.map((reading) => reading.power),
+                [275]
+            );
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('announces no reconnect when a connected listener drops the link and a disconnected listener disconnects', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
+        const statuses: ConnectionStatus[] = [];
+        let sawConnected = false;
+        try {
+            conn.onStatusChange((status) => {
+                statuses.push(status);
+                if (status === 'connected') {
+                    sawConnected = true;
+                    fake.device.dropConnection();
+                } else if (status === 'disconnected' && sawConnected) {
+                    conn.disconnect();
+                }
+            });
+
+            fake.device.dropConnection();
+            await waitFor(() => statuses.length === 5, 1000, 'deferred disconnect teardown');
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
+            assert.deepEqual(statuses, ['disconnected', 'reconnecting', 'connected', 'disconnected', 'disconnected']);
+            assert.equal(fake.device.gatt.connected, false);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('does not reconnect when a connected listener drops the link and a later connected listener disconnects', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
+        const first: ConnectionStatus[] = [];
+        const second: ConnectionStatus[] = [];
+        try {
+            conn.onStatusChange((status) => {
+                first.push(status);
+                if (status === 'connected') fake.device.dropConnection();
+            });
+            conn.onStatusChange((status) => {
+                second.push(status);
+                if (status === 'connected') conn.disconnect();
+            });
+
+            fake.device.dropConnection();
+            await waitFor(() => second.length === 4, 1000, 'manual disconnect during connected');
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
+            const expected: ConnectionStatus[] = ['disconnected', 'reconnecting', 'connected', 'disconnected'];
+            assert.deepEqual(first, expected);
+            assert.deepEqual(second, expected);
+            assert.equal(fake.device.gatt.connected, false);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('recovers when a setup-reading listener drops the link immediately after reconnect', async () => {
+        const char = new FakeCharacteristic(HEART_RATE_MEASUREMENT);
+        const fake = createFakeBluetooth({ services: { [HEART_RATE]: { [HEART_RATE_MEASUREMENT]: char } } });
+        const conn = await connectHeartRate({
+            bluetooth: fake.bluetooth,
+            reconnect: { baseDelayMs: 2, maxAttempts: 2 },
+        });
+        try {
+            const statuses: ConnectionStatus[] = [];
+            conn.onStatusChange((status) => statuses.push(status));
+            let droppedOnce = false;
+            conn.addListener(() => {
+                if (!droppedOnce) {
+                    droppedOnce = true;
+                    fake.device.dropConnection();
+                }
+            });
+            const start = char.startNotifications.bind(char);
+            let reconnects = 0;
+            char.startNotifications = async () => {
+                if (++reconnects === 1) char.emit(heartRatePacket(152));
+                return start();
+            };
+
+            fake.device.dropConnection();
+            await waitFor(
+                () => statuses.filter((status) => status === 'connected').length === 2,
+                1000,
+                'reconnect after setup reading drop'
+            );
+
+            assert.equal(fake.device.gatt.connected, true);
+            assert.equal(char.listenerCount, 1);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
+    it('recovers when a microtask queued by a connected listener drops the link', async () => {
+        const fake = powerMeterSetup();
+        const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
+        const statuses: ConnectionStatus[] = [];
+        let droppedOnce = false;
+        try {
+            conn.onStatusChange((status) => {
+                statuses.push(status);
+                if (status === 'connected' && !droppedOnce) {
+                    droppedOnce = true;
+                    queueMicrotask(() => fake.device.dropConnection());
+                }
+            });
+
+            fake.device.dropConnection();
+            await waitFor(
+                () => statuses.filter((status) => status === 'connected').length === 2,
+                1000,
+                'reconnect after microtask drop'
+            );
+            assert.equal(fake.device.gatt.connected, true);
+        } finally {
+            conn.disconnect();
+        }
+    });
+
     it('reports failed once reconnection gives up', async () => {
         const fake = powerMeterSetup();
         const conn = await connectPower({ bluetooth: fake.bluetooth, reconnect: { baseDelayMs: 2, maxAttempts: 2 } });
@@ -1119,6 +1287,9 @@ describe('listeners that throw', () => {
 
         // Capture the scheduled callback instead of letting it run: thrown for
         // real, it would be an uncaught exception in the test process.
+        const target = globalThis as { reportError?: (error: unknown) => void };
+        const previousReportError = target.reportError;
+        delete target.reportError;
         const scheduled: (() => void)[] = [];
         const realSetTimeout = globalThis.setTimeout;
         globalThis.setTimeout = ((callback: () => void) => {
@@ -1129,6 +1300,7 @@ describe('listeners that throw', () => {
             fake.characteristic(CYCLING_POWER, CYCLING_POWER_MEASUREMENT).emit(powerPacket(200));
         } finally {
             globalThis.setTimeout = realSetTimeout;
+            if (previousReportError !== undefined) target.reportError = previousReportError;
         }
 
         assert.equal(readings.length, 1, 'delivery finishes first');

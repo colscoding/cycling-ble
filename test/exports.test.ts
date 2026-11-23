@@ -7,9 +7,12 @@ import type { BluetoothAdapter, ConnectOptions } from '../src/index.js';
 
 // Type-only surface, checked by `pnpm run typecheck` rather than at runtime.
 // ConnectOptions.bluetooth is typed with BluetoothAdapter, so anyone writing a
-// polyfill or a fake needs to be able to name it.
+// polyfill or a fake needs to be able to name it, and the browser's real
+// navigator.bluetooth must remain structurally assignable to it.
 const adapterIsNameable: ConnectOptions['bluetooth'] = undefined as BluetoothAdapter | undefined;
+const browserBluetoothSatisfiesAdapter: BluetoothAdapter = undefined as unknown as Bluetooth;
 void adapterIsNameable;
+void browserBluetoothSatisfiesAdapter;
 
 describe('public surface', () => {
     it('exports the three connect functions', () => {
@@ -24,9 +27,11 @@ describe('public surface', () => {
 
     it('exports the parsers from the subpath', () => {
         assert.equal(typeof parsers.parsePowerMeasurement, 'function');
+        assert.equal(typeof parsers.parsePowerCadence, 'function');
         assert.equal(typeof parsers.parseHeartRateMeasurement, 'function');
         assert.equal(typeof parsers.parseCadenceMeasurement, 'function');
         assert.equal(typeof parsers.parseIndoorBikeData, 'function');
+        assert.equal(typeof parsers.initialCadenceState, 'object');
     });
 
     it('exports the mocks from the subpath', () => {

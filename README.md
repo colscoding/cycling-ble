@@ -324,7 +324,9 @@ without hardware, and end-to-end tests:
 
 `createMockPowerSensor`, `createMockHeartRateSensor`, and
 `createMockCadenceSensor` each take `{ deviceName?, intervalMs?, autoStart? }`.
-`intervalMs` defaults to `1000` and `autoStart` to `true`; the first generated
+`intervalMs` defaults to `1000` (must be a finite number from `0` through
+`2147483647`; invalid values throw `RangeError`) and `autoStart` defaults to
+`true`; the first generated
 reading arrives after one interval. Generated readings contain just the
 sensor's metric: 200–250 W, 140–160 bpm, or 80–100 rpm, respectively. Default
 names are `Mock Power Sensor`, `Mock Heart Rate Monitor`, and
@@ -359,11 +361,12 @@ sent `'connected'` again. A simulated `'failed'` can therefore be reversed for
 testing, unlike a real connection's final failure. After `disconnect()`,
 `emit()` and `simulateStatus()` are ignored.
 
-Every listener receives each reading or status even if one throws. A mock
-then rethrows the first error from `emit()`, `simulateStatus()`, or
-`disconnect()`, so an assertion that fails inside a listener fails the test
-that called it. Avoid nested mock status changes inside a status listener;
-see [Known limitations](#known-limitations).
+Every listener receives each reading or status even if one throws. Nested
+status changes triggered by a status listener (such as calling `disconnect()`
+during `simulateStatus('connected')`) are queued so every listener sees
+transitions in order, matching a real connection. A mock then rethrows the
+first error from `emit()`, `simulateStatus()`, or `disconnect()`, so an
+assertion that fails inside a listener fails the test that called it.
 
 ## Implemented services
 
@@ -386,16 +389,6 @@ other unreported fields are checked for length but not exposed as readings.
   Calling `disconnect()` on one drops the link under the other, which normally
   starts automatic reconnection if enabled. A power meter that reports
   crank data needs only `connectPower`, which already yields its cadence.
-- **A drop during reconnect status delivery can be lost.** If a `connected`
-  listener disconnects another subscription sharing the device, the first
-  subscription can stop receiving readings while still reporting `connected`
-  and never retry. Avoid changing another connection on the same device from
-  that callback; if this occurs, disconnect the affected subscription and
-  connect afresh.
-- **Nested mock statuses are not queued.** If a mock status listener calls
-  `disconnect()` during `simulateStatus('connected')`, later listeners receive
-  `disconnected` followed by `connected`, even though the mock has stopped.
-  Trigger the next mock transition after the current call returns.
 - **FTMS Resistance Level width.** The parser assumes a two-byte Resistance
   Level field. The
   [2026-09-09 GATT Specification Supplement, §3.139](https://btprodspecificationrefs.blob.core.windows.net/gatt-specification-supplement/GATT_Specification_Supplement.pdf#page=125)

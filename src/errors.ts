@@ -68,10 +68,7 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
     const text = message.toLowerCase();
 
     if (
-        text.includes('user cancelled') ||
-        text.includes('cancelled the requestdevice') ||
-        text.includes('dialog cancelled') ||
-        text.includes('chooser cancelled') ||
+        /(?:user|dialog|chooser)\s+cancell?ed|cancell?ed the requestdevice/.test(text) ||
         (name === 'NotFoundError' && text.includes('cancel'))
     ) {
         return {
@@ -83,7 +80,12 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         };
     }
 
-    if (text.includes('securityerror') || text.includes('permission') || name === 'SecurityError') {
+    if (
+        text.includes('securityerror') ||
+        text.includes('permission') ||
+        name === 'SecurityError' ||
+        name === 'NotAllowedError'
+    ) {
         return {
             kind: 'permission-denied',
             title: 'Permission denied',
@@ -146,7 +148,7 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         // the browser cannot look devices up. Retrying the same call cannot
         // help, which is what separates this from a lookup that failed.
         text.includes('does not support getdevices') ||
-        (name === 'NotFoundError' && text.includes('bluetooth'))
+        (name === 'NotFoundError' && text.includes('bluetooth') && !text.includes('no bluetooth devices'))
     ) {
         return {
             kind: 'unavailable',
@@ -167,7 +169,7 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
         text.includes('no devices found') ||
         // Thrown by the connect functions for a stale previousDeviceId.
         text.includes('not found in the permitted device list') ||
-        (name === 'NotFoundError' && !text.includes('bluetooth'))
+        name === 'NotFoundError'
     ) {
         return {
             kind: 'not-found',
@@ -218,6 +220,15 @@ export function classifyBluetoothError(error: unknown, options: ClassifyOptions 
     };
 }
 
+/** Stringify any thrown value without failing on null-prototype or hostile objects. */
+function safeString(value: unknown): string {
+    try {
+        return String(value);
+    } catch {
+        return '';
+    }
+}
+
 /**
  * The name and message of anything a `catch` can receive. Errors that cross a
  * realm, a worker, or a serialisation boundary are no longer `instanceof Error`
@@ -228,10 +239,10 @@ function nameAndMessage(error: unknown): { name: string; message: string } {
         const { name, message } = error as { name?: unknown; message?: unknown };
         return {
             name: typeof name === 'string' ? name : '',
-            message: typeof message === 'string' ? message : String(error),
+            message: typeof message === 'string' ? message : safeString(error),
         };
     }
-    return { name: '', message: String(error) };
+    return { name: '', message: safeString(error) };
 }
 
 /** Only a missing attribute permits probing the next candidate service. */

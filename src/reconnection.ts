@@ -58,9 +58,10 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
     }
 
     let attempts = 0;
-    let reconnecting = false;
+    /** Identifies the in-flight reconnect cycle so a newer cycle is never clobbered. */
+    let activeCycle: symbol | null = null;
     let manualDisconnect = false;
-    /** Set once 'failed' is reported. Until reset(), further drops are ignored. */
+    /** Set once 'failed' is reported or a disabled manager drops. Until reset(), further drops are ignored. */
     let gaveUp = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let pendingResolve: (() => void) | null = null;
@@ -78,11 +79,11 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             }, ms);
         });
 
-    const attemptReconnect = async (connectFn: () => Promise<void>): Promise<void> => {
+    const attemptReconnect = async (connectFn: () => Promise<void>, cycle: symbol): Promise<void> => {
         // A loop rather than a retry that awaits itself: with maxAttempts set to
         // Infinity, recursion would chain one more pending promise per failed
         // attempt for as long as the outage lasts.
-        while (enabled && !manualDisconnect) {
+        while (!manualDisconnect) {
             if (attempts >= maxAttempts) {
                 logger.error(`[${sensorName}] max reconnection attempts reached`);
                 gaveUp = true;
@@ -107,11 +108,19 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
 
             try {
                 await connectFn();
+                if (manualDisconnect) {
+                    logger.info(`[${sensorName}] reconnection cancelled`);
+                    return;
+                }
                 logger.info(`[${sensorName}] reconnected`);
-                attempts = 0;
+                if (activeCycle === cycle) attempts = 0;
                 return;
             } catch (error) {
-                logger.error(`[${sensorName}] reconnection failed:`, error);
+                if (manualDisconnect) {
+                    logger.info(`[${sensorName}] reconnection cancelled`);
+                } else {
+                    logger.error(`[${sensorName}] reconnection failed:`, error);
+                }
             }
         }
     };
@@ -123,16 +132,26 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             // event starts its own backoff chain and they race each other.
             // After giving up, a late event — such as the one fired by closing a
             // half-open link — must not reopen a connection reported as failed.
-            if (manualDisconnect || reconnecting || gaveUp) return Promise.resolve();
+            if (manualDisconnect || activeCycle !== null || gaveUp) return Promise.resolve();
 
-            notify('disconnected');
-            if (!enabled) return Promise.resolve();
+            const cycle = Symbol();
+            activeCycle = cycle;
+            try {
+                notify('disconnected');
+            } catch (error) {
+                activeCycle = null;
+                throw error;
+            }
+            if (!enabled || manualDisconnect) {
+                if (!enabled) gaveUp = true;
+                activeCycle = null;
+                return Promise.resolve();
+            }
 
-            reconnecting = true;
-            return attemptReconnect(connectFn)
+            return attemptReconnect(connectFn, cycle)
                 .catch((e) => logger.error(`[${sensorName}] reconnect failed:`, e))
                 .finally(() => {
-                    reconnecting = false;
+                    if (activeCycle === cycle) activeCycle = null;
                 });
         },
 
@@ -152,6 +171,7 @@ export function createReconnectionManager(config: ReconnectionConfig): Reconnect
             attempts = 0;
             manualDisconnect = false;
             gaveUp = false;
+            activeCycle = null;
         },
     };
 }
