@@ -418,12 +418,14 @@ saying which model would genuinely help.
 
 ## Development
 
-For development, use the Node version in `.nvmrc` (currently 24.22.3) and the
+For development, use the Node version in `.nvmrc` (currently 26.13.1) and the
 pnpm version pinned in `package.json` (currently 12.21.0). These are the versions
 used by the local checks, separate from the package's Node 22 runtime minimum.
 
 ```sh
 nvm use
+# Node 25 and later no longer bundle Corepack, so install it first
+npm install --global corepack@0.36.0
 corepack enable pnpm
 pnpm install --frozen-lockfile
 pnpm test               # run the suite
@@ -432,10 +434,9 @@ pnpm run build && pnpm run test:package # check the packed artifact in isolation
 pnpm run check          # types, lint, format, coverage, release-script tests, build, package check
 ```
 
-Corepack 0.36.0 was verified with this toolchain. If Corepack is missing or an
-older installation cannot launch pnpm, follow the
-[Corepack installation instructions](https://github.com/nodejs/corepack#how-to-install)
-and enable its pnpm shim. pnpm can also be installed through its
+Corepack 0.36.0 was verified with this toolchain; see its
+[installation instructions](https://github.com/nodejs/corepack#how-to-install)
+for other setups. pnpm can also be installed through its
 [documented alternatives](https://pnpm.io/installation).
 
 Tests use Node's built-in runner. `test/helpers/fake-bluetooth.ts` fakes the
