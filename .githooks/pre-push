@@ -24,7 +24,12 @@ if [ -z "$commit" ]; then
 fi
 
 summary=$(git log -1 --format='%h %s' "$commit")
-directory=$(mktemp -d "${TMPDIR:-/tmp}/cycling-ble-pre-push.XXXXXX")
+# Not under /tmp: pnpm hard-links packages from its store, which only works on
+# the same filesystem, and /tmp is often a separate tmpfs. pnpm would then fill
+# a second store there and download everything again after every reboot.
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/cycling-ble
+mkdir -p "$cache"
+directory=$(mktemp -d "$cache/pre-push.XXXXXX")
 trap 'rm -rf "$directory"' EXIT
 git archive "$commit" | tar -xf - -C "$directory"
 
