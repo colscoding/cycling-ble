@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Runs the full check on every commit pushed to main.
+#
+# The Release workflow is this repository's only workflow, so nothing on
+# GitHub checks main before a release. Enable this hook once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# It checks a clean export of the pushed commit with dependencies installed
+# from that commit's own lockfile, the way the Release workflow does. Local
+# edits, untracked files, and a stale node_modules can neither make the check
+# pass nor fail.
+set -euo pipefail
+
+commit=
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+    # Deleting a branch pushes an all-zero object name: nothing to check.
+    if [ "$remote_ref" = refs/heads/main ] && [[ ! $local_sha =~ ^0+$ ]]; then
+        commit=$local_sha
+    fi
+done
+if [ -z "$commit" ]; then
+    exit 0
+fi
+
+summary=$(git log -1 --format='%h %s' "$commit")
+directory=$(mktemp -d "${TMPDIR:-/tmp}/cycling-ble-pre-push.XXXXXX")
+trap 'rm -rf "$directory"' EXIT
+git archive "$commit" | tar -xf - -C "$directory"
+
+# Keep the checks from acting on this repository through variables that Git
+# sets for hooks, such as GIT_DIR.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
+echo "pre-push: checking $summary before it reaches main"
+cd "$directory"
+if ! pnpm install --frozen-lockfile --prefer-offline || ! pnpm run check; then
+    echo "pre-push: the check failed for $summary; nothing was pushed" >&2
+    exit 1
+fi
+echo "pre-push: the check passed for $summary"

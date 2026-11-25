@@ -421,6 +421,7 @@ nvm use
 npm install --global corepack@0.36.0
 corepack enable pnpm
 pnpm install --frozen-lockfile
+git config core.hooksPath .githooks # check every commit before it is pushed to main
 pnpm test               # run the suite
 pnpm run test:coverage  # run it with coverage, failing below the thresholds
 pnpm run build && pnpm run test:package # check the packed artifact in isolation
@@ -438,9 +439,14 @@ reconnection, and teardown logic run without a browser or a sensor. Parser
 tests build packets byte by byte from the Bluetooth specifications. Coverage
 must reach 98% of lines, 95% of branches, and 90% of functions. The package
 check verifies ESM and CommonJS imports, declarations in an isolated consumer,
-and source-map targets. There are no browser or hardware integration tests,
-and no workflow checks pushes or pull requests; run `pnpm run check` locally
-before submitting changes.
+and source-map targets. There are no browser or hardware integration tests.
+
+The Release workflow is the only workflow, so nothing on GitHub checks pushes
+or pull requests. Instead, the `pre-push` hook in `.githooks/` runs
+`pnpm run check` before anything reaches `main`. It checks a clean export of
+the pushed commit, with dependencies installed from that commit's lockfile, so
+uncommitted files cannot affect the result. Run `pnpm run check` yourself
+before opening a pull request.
 
 ### Releases
 
